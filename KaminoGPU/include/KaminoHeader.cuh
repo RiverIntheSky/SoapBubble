@@ -59,6 +59,6 @@ enum gridType { FLUIDGRID, SOLIDGRID };
 enum Coord { phi, theta };
 
 # define WRITE_VELOCITY_DATA
-# define WRITE_PARTICLES
+// # define WRITE_PARTICLES
 # define RUNGE_KUTTA
 # define PERFORMANCE_BENCHMARK

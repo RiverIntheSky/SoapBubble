@@ -20,13 +20,13 @@ link_directories(./lib)
    
    set(CUDA_HOST_COMPILER  /usr/bin/g++-6)
    find_package(CUDA REQUIRED)
-   include_directories(/usr/local/cuda/include)
-   include_directories(/usr/local/cuda/samples/common/inc)
-   link_directories(/usr/local/cuda/lib64)
+   include_directories(/opt/cuda/include)
+   include_directories(/opt/cuda/samples/common/inc)
+   link_directories(/opt/cuda/lib64)
    set(CUDA_SEPARABLE_COMPILATION ON)
 
-   set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-gencode arch=compute_61,code=sm_61;)
-   message("arch=61")
+   set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-gencode arch=compute_52,code=sm_52;)
+   message("arch=52")
    
 cuda_add_executable(kamino
    ./kernel/KaminoCore.cu
