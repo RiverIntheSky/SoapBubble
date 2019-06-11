@@ -1,7 +1,1 @@
-GPU implementation of [my SIGGRAPH I3D paper](http://i3dsymposium.github.io/2019/papers.html#Papers1).
-
-Usage: ./KaminoGPU.exe configKamino.txt
-
-See the CPU counterpart for the format of configKamino.txt.
-
-If the project fails to open, simply modify the CUDA version specified in KaminoGPU.vcproj file.
+Usage: ./kamino configKamino.txt
