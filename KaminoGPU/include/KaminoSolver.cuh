@@ -6,107 +6,116 @@
 class KaminoSolver
 {
 private:
-	// Handle for batched FFT
-	cufftHandle kaminoPlan;
+    // Handle for batched FFT
+    cufftHandle kaminoPlan;
 
-	// KaminoParticles* particles;
+    // KaminoParticles* particles;
 
-	// Buffer for U, the fouriered coefs
-	// This pointer's for the pooled global memory (nTheta by nPhi)
-	ComplexFourier* gpuUFourier;
-	fReal* gpuUReal;
-	fReal* gpuUImag;
+    // Buffer for U, the fouriered coefs
+    // This pointer's for the pooled global memory (nTheta by nPhi)
+    ComplexFourier* gpuUFourier;
+    fReal* gpuUReal;
+    fReal* gpuUImag;
 
-	// Buffer for V, the fouriered coefs
-	// This pointer's for the pooled global memory as well
-	ComplexFourier* gpuFFourier;
-	fReal* gpuFReal;
-	fReal* gpuFImag;
-	fReal* gpuFZeroComponent;
+    // Buffer for V, the fouriered coefs
+    // This pointer's for the pooled global memory as well
+    ComplexFourier* gpuFFourier;
+    fReal* gpuFReal;
+    fReal* gpuFImag;
+    fReal* gpuFZeroComponent;
 
-	/// Precompute these!
-	// nPhi by nTheta elements, but they should be retrieved by shared memories
-	// in the TDM kernel we solve nTheta times with each time nPhi elements.
-	fReal* gpuA;
-	// Diagonal elements b (major diagonal);
-	fReal* gpuB;
-	// Diagonal elements c (upper);
-	fReal* gpuC;
-	void precomputeABCCoef();
+    // Buffer for elements that can be precomputed
+    fReal* div;
 
-	/* Grid dimensions */
-	size_t nPhi;
-	size_t nTheta;
-	/* Cuda dimensions */
-	size_t nThreadxMax;
-	/* Radius of sphere */
-	fReal radius;
-	/* Grid size */
-	fReal gridLen;
-	/* Inverted grid size*/
-	fReal invGridLen;
+    /// Precompute these!
+    // nPhi by nTheta elements, but they should be retrieved by shared memories
+    // in the TDM kernel we solve nTheta times with each time nPhi elements.
+    fReal* gpuA;
+    // Diagonal elements b (major diagonal);
+    fReal* gpuB;
+    // Diagonal elements c (upper);
+    fReal* gpuC;
+    void precomputeABCCoef();
 
-	/* harmonic coefficients for velocity field initializaton */
-	fReal A;
-	int B, C, D, E;
+    /* Grid dimensions */
+    size_t nPhi;
+    size_t nTheta;
+    /* Cuda dimensions */
+    size_t nThreadxMax;
+    /* Radius of sphere */
+    fReal radius;
+    /* Grid size */
+    fReal gridLen;
+    /* Inverted grid size*/
+    fReal invGridLen;
 
-	/* So that it remembers all these attributes within */
-	//std::map<std::string, KaminoQuantity*> centeredAttr;
-	//std::map<std::string, KaminoQuantity*> staggeredAttr;
+    /* harmonic coefficients for velocity field initializaton */
+    fReal A;
+    int B, C, D, E;
 
-	KaminoQuantity* velTheta;
-	KaminoQuantity* velPhi;
-	KaminoQuantity* pressure;
-	KaminoQuantity* density;
-	void copyVelocity2GPU();
-	void copyVelocityBack2CPU();
-	void copyDensity2GPU();
-	void copyDensityBack2CPU();
+    /* So that it remembers all these attributes within */
+    //std::map<std::string, KaminoQuantity*> centeredAttr;
+    //std::map<std::string, KaminoQuantity*> staggeredAttr;
 
-	/* Something about time steps */
-	fReal frameDuration;
-	fReal timeStep;
-	fReal timeElapsed;
+    KaminoQuantity* velTheta;
+    KaminoQuantity* velPhi;
+    KaminoQuantity* thickness;
+    KaminoQuantity* bulkConcentration;
+    KaminoQuantity* surfConcentration;
+    KaminoQuantity* pressure;
+    KaminoQuantity* density;
+    void copyVelocity2GPU();
+    void copyVelocityBack2CPU();
+    void copyDensity2GPU();
+    void copyDensityBack2CPU();
 
-	float advectionTime;
-	float geometricTime;
-	float projectionTime;
+    /* Something about time steps */
+    fReal frameDuration;
+    fReal timeStep;
+    fReal timeElapsed;
 
-	/// Kernel calling from here
-	void advection();
-	void geometric();
-	void projection();
+    float advectionTime;
+    float geometricTime;
+    float bodyforceTime;
+    float projectionTime;
 
-	// Swap all these buffers of the attributes.
-	void swapVelocityBuffers();
+    /// Kernel calling from here
+    void advection();
+    void geometric();
+    void bodyforce();
+    void projection();
 
-	/* distribute initial velocity values at grid points */
-	void initialize_velocity();
+    // Swap all these buffers of the attributes.
+    void swapVelocityBuffers();
 
-	void mapPToSphere(vec3& pos) const;
-	void mapVToSphere(vec3& pos, vec3& vel) const;
+    /* distribute initial velocity values at grid points */
+    void initialize_velocity();
+
+    void mapPToSphere(vec3& pos) const;
+    void mapVToSphere(vec3& pos, vec3& vel) const;
 	
-	/* FBM noise function for velocity distribution */
-	fReal FBM(const fReal x, const fReal y);
-	/* 2D noise interpolation function for smooth FBM noise */
-	fReal interpNoise2D(const fReal x, const fReal y) const;
-	/* returns a pseudorandom number between -1 and 1 */
-	fReal rand(const vec2 vecA) const;
-	/* determine the layout of the grids and blocks */
-	void determineLayout(dim3& gridLayout, dim3& blockLayout,
-		size_t nRow_theta, size_t nCol_phi);
+    /* FBM noise function for velocity distribution */
+    fReal FBM(const fReal x, const fReal y);
+    /* 2D noise interpolation function for smooth FBM noise */
+    fReal interpNoise2D(const fReal x, const fReal y) const;
+    /* returns a pseudorandom number between -1 and 1 */
+    fReal rand(const vec2 vecA) const;
+    /* determine the layout of the grids and blocks */
+    void determineLayout(dim3& gridLayout, dim3& blockLayout,
+			 size_t nRow_theta, size_t nCol_phi);
 public:
-	KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
-		fReal A, int B, int C, int D, int E);
-	~KaminoSolver();
+    KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
+		 fReal A, int B, int C, int D, int E);
+    ~KaminoSolver();
 
-	void initDensityfromPic(std::string path);
-	void initParticlesfromPic(std::string path, size_t parPergrid);
+    void initWithConst(KaminoQuantity* attrib, fReal val);
+    void initDensityfromPic(std::string path);
+    void initParticlesfromPic(std::string path, size_t parPergrid);
 
-	void stepForward(fReal timeStep);
+    void stepForward(fReal timeStep);
 
-	void write_data_bgeo(const std::string& s, const int frame);
-	void write_particles_bgeo(const std::string& s, const int frame);
+    void write_data_bgeo(const std::string& s, const int frame);
+    void write_particles_bgeo(const std::string& s, const int frame);
 
-	KaminoParticles* particles;
+    KaminoParticles* particles;
 };
