@@ -715,6 +715,22 @@ __global__ void applyforceThickness
 	+ thicknessInput[thetaId * nPhiGlobal + phiId];
 }
 
+__global__ void applyforceSurfConcentration
+(fReal* sConcentrationOutput, fReal* sConcentrationInput, fReal* div, size_t nPitchInElements)
+{
+    // Index
+    int splitVal = nPhiGlobal / blockDim.x;
+    int threadSequence = blockIdx.x % splitVal;
+    int phiId = threadIdx.x + threadSequence * blockDim.x;
+    int thetaId = blockIdx.x / splitVal;
+
+    // TODO: add diffusivity
+    fReal f = -div[thetaId * nPhiGlobal + phiId];
+    fReal factor = timeStepGlobal / radiusGlobal;
+    sConcentrationOutput[thetaId * nPhiGlobal + phiId] = f * factor * sConcentrationOutput[thetaId * nPhiGlobal + phiId]
+	+ sConcentrationInput[thetaId * nPhiGlobal + phiId];
+}
+
 void KaminoSolver::bodyforce()
 {
     dim3 gridLayout;
@@ -728,6 +744,11 @@ void KaminoSolver::bodyforce()
 
     applyforceThickness<<<gridLayout, blockLayout>>>
 	(thickness->getGPUNextStep(), thickness->getGPUThisStep(), div, thickness->getNextStepPitchInElements());
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
+
+    applyforceSurfConcentration<<<gridLayout, blockLayout>>>
+	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(), div, surfConcentration->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 }
