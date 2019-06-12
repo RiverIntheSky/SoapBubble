@@ -648,6 +648,7 @@ void KaminoSolver::geometric()
 
 __global__ void crKernel(fReal *d_a, fReal *d_b, fReal *d_c, fReal *d_d, fReal *d_x);
 
+// div(u) at cell center
 __global__ void comDivergenceKernel
 (fReal* div, fReal* velPhi, fReal* velTheta,
  size_t velPhiPitchInElements, size_t velThetaPitchInElements)
@@ -988,18 +989,23 @@ void KaminoSolver::projection()
     swapVelocityBuffers();
 }
 
-Kamino::Kamino(fReal radius, size_t nTheta, fReal particleDensity,
-	       float dt, float DT, int frames,
-	       fReal A, int B, int C, int D, int E,
+Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
+	       fReal sigma_a, fReal R, fReal T, fReal rho, fReal mu,
+	       fReal Ds, fReal g,  fReal rm, size_t nTheta, fReal particleDensity,
+	       float dt, float DT, int frames, fReal A, int B, int C, int D, int E,
 	       std::string gridPath, std::string particlePath,
 	       std::string densityImage, std::string solidImage, std::string colorImage) :
-    radius(radius), nTheta(nTheta), nPhi(2 * nTheta), gridLen(M_PI / nTheta),
-    particleDensity(particleDensity),
+    radius(radius), H(H), U(U), c_m(c_m), Gamma_m(Gamma_m), sigma_a(sigma_a), R(R), T(T),
+    rho(rho), mu(mu), Ds(Ds), g(g/(U*U)), rm(rm), epsilon(H), sigma_r(R*T),
+    M(Gamma_m*R*T/(3*rho*H*U*U)), S(sigma_a*H/(2*mu*U)), re(mu/(rho*U)),
+    nTheta(nTheta), nPhi(2 * nTheta),
+    gridLen(M_PI / nTheta), particleDensity(particleDensity),
     dt(dt), DT(DT), frames(frames),
     A(A), B(B), C(C), D(D), E(E),
     gridPath(gridPath), particlePath(particlePath),
     densityImage(densityImage), solidImage(solidImage), colorImage(colorImage)
-{}
+{
+}
 
 Kamino::~Kamino()
 {}
