@@ -44,6 +44,8 @@ private:
     size_t nThreadxMax;
     /* Radius of sphere */
     fReal radius;
+    /* Inverted radius of sphere */
+    fReal invRadius;
     /* Grid size */
     fReal gridLen;
     /* Inverted grid size*/

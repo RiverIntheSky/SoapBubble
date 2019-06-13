@@ -12,7 +12,7 @@ static __constant__ fReal gridLenGlobal;
 
 KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
 			   fReal A, int B, int C, int D, int E) :
-    nPhi(nPhi), nTheta(nTheta), radius(radius), gridLen(M_2PI / nPhi), invGridLen(1.0 / gridLen), frameDuration(frameDuration),
+    nPhi(nPhi), nTheta(nTheta), radius(radius), invRadius(1.0/radius), gridLen(M_2PI / nPhi), invGridLen(1.0 / gridLen), frameDuration(frameDuration),
     timeStep(0.0), timeElapsed(0.0), advectionTime(0.0), geometricTime(0.0), projectionTime(0.0),
     A(A), B(B), C(C), D(D), E(E)
 {
@@ -67,9 +67,9 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 						 centeredPhiOffset, centeredThetaOffset);
 			   				   
 
+    initWithConst(this->velPhi, 0.0);
     initialize_velocity();
-    // initWithConst(this->velPhi, 0.0);
-    // initWithConst(this->velTheta, 0.0);
+    //initWithConst(this->velTheta, 0.0);
     // initWithConst(this->thickness, 1.0);
     initWithConst(this->bulkConcentration, 1.0);
     initWithConst(this->surfConcentration, 1.0);
@@ -267,13 +267,11 @@ void KaminoSolver::copyDensityBack2CPU()
 
 void KaminoSolver::initWithConst(KaminoQuantity* attrib, fReal val)
 {
-    for (size_t i = 0; i < attrib->getNPhi(); ++i)
-	{
-	    for (size_t j = 0; j < attrib->getNTheta(); ++j)
-		{
-		    attrib->setCPUValueAt(i, j, val);
-		}
-	}
+    for (size_t i = 0; i < attrib->getNPhi(); ++i) {
+	for (size_t j = 0; j < attrib->getNTheta(); ++j) {
+		attrib->setCPUValueAt(i, j, val);
+	    }
+    }
     attrib->copyToGPU();
 }
 

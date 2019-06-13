@@ -9,6 +9,7 @@ class Kamino
 {
 private:
     fReal radius;               // radius of sphere. m
+    fReal invRadius;		// inverted radius of sphere. m^-1
     fReal H;			// characteristic film thickness. m
     fReal U;			// characteristic flow velocity. m s^-1
     fReal c_m;			// bulk mean concentration. mol m^-3
@@ -57,7 +58,7 @@ private:
     vec3* colorMap;
 
 public:
-    Kamino(fReal radius = 5.0, fReal H = 0.0000005, fReal U = 1.0, fReal c_m = 0.5,
+    Kamino(fReal radius = 0.05, fReal H = 0.0000005, fReal U = 1.0, fReal c_m = 0.5,
 	   fReal Gamma_m = 0.000001, fReal sigma_a = 0.07275, fReal R = 8.3144598, fReal T = 298.15,
 	   fReal rho = 997, fReal mu = 0.010005, fReal Ds = 0.01, fReal g = 9.8,
 	   fReal rm = 0.000000005,size_t nTheta = 128, fReal particleDensity = 200.0,

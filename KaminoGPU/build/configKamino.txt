@@ -1,4 +1,4 @@
-radius 5.0
+radius 0.05
 H 0.0000005
 U 1.0
 cm 0.5
@@ -14,7 +14,7 @@ rm 0.000000005
 numberOfGridsInTheta 256
 particleDensity 200.0
 timePerStep 0.0002
-timePerFrame 0.05
+timePerFrame 0.02
 frameNumbers 500
 A 0.0
 B 1

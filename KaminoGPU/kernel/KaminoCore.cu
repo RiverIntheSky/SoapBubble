@@ -4,6 +4,7 @@
 
 static __constant__ size_t nPhiGlobal;
 static __constant__ size_t nThetaGlobal;
+static __constant__ fReal invRadiusGlobal;
 static __constant__ fReal radiusGlobal;
 static __constant__ fReal timeStepGlobal;
 static __constant__ fReal gridLenGlobal;
@@ -202,7 +203,7 @@ __global__ void advectionVPhiKernel
 
     fReal latRadius = radiusGlobal * sinf(gTheta);
     fReal cofPhi = timeStepGlobal / latRadius;
-    fReal cofTheta = timeStepGlobal / radiusGlobal;
+    fReal cofTheta = timeStepGlobal * invRadiusGlobal;
 
     fReal deltaPhi = guPhi * cofPhi;
     fReal deltaTheta = guTheta * cofTheta;
@@ -418,26 +419,9 @@ void KaminoSolver::advection()
 	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), thickness->getNextStepPitchInElements());	
     thickness->swapGPUBuffer();
     surfConcentration->swapGPUBuffer();
-    bulkConcentration->swapGPUBuffer();
+    // bulkConcentration->swapGPUBuffer(); // no bulk concentration yet
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
-
-
-    // # ifdef WRITE_VELOCITY_DATA
-    // 	determineLayout(gridLayout, blockLayout, density->getNTheta(), density->getNPhi());
-    // 	advectionCentered<<<gridLayout, blockLayout>>>
-    // 	(density->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(),
-    // 		density->getGPUThisStep(), density->getNextStepPitchInElements());
-	
-    // 	density->swapGPUBuffer();
-    // # endif
-    // # ifdef WRITE_PARTICLES
-    // 	determineLayout(gridLayout, blockLayout, 1, particles->numOfParticles);
-    // 	advectionParticles<<<gridLayout, blockLayout>>>
-    // 	(particles->coordGPUNextStep, velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), particles->coordGPUThisStep,
-    // 		velPhi->getNextStepPitchInElements());
-    // 	particles->swapGPUBuffers();
-    // # endif
 
     swapVelocityBuffers();
 }
@@ -690,7 +674,7 @@ __global__ void comDivergenceKernel
     fReal invGridSine = 1.0 / sinf(gridThetaCoord);
     fReal sinNorth = sinf(thetaNorth);
     fReal sinSouth = sinf(thetaSouth);
-    fReal factor = invGridSine / gridLenGlobal;
+    fReal factor = invGridSine * invRadiusGlobal / gridLenGlobal;
     fReal termTheta = factor * (vSouth * sinSouth - vNorth * sinNorth);
     fReal termPhi = factor * (uEast - uWest);
 
@@ -1016,7 +1000,7 @@ Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
 	       float dt, float DT, int frames, fReal A, int B, int C, int D, int E,
 	       std::string thicknessPath, std::string particlePath,
 	       std::string thicknessImage, std::string solidImage, std::string colorImage) :
-    radius(radius), H(H), U(U), c_m(c_m), Gamma_m(Gamma_m), sigma_a(sigma_a), R(R), T(T),
+    radius(radius), invRadius(1/radius), H(H), U(U), c_m(c_m), Gamma_m(Gamma_m), sigma_a(sigma_a), R(R), T(T),
     rho(rho), mu(mu), Ds(Ds), g(g/(U*U)), rm(rm), epsilon(H), sigma_r(R*T),
     M(Gamma_m*R*T/(3*rho*H*U*U)), S(sigma_a*H/(2*mu*U)), re(mu/(rho*U)),
     nTheta(nTheta), nPhi(2 * nTheta),
@@ -1028,6 +1012,7 @@ Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
 {
     std::cout << "Re^-1 " << re << std::endl;
     std::cout << "S " << S << std::endl;
+    std::cout << "inv radius " << invRadius << std::endl;
 }
 
 Kamino::~Kamino()
@@ -1044,6 +1029,7 @@ void Kamino::run()
     checkCudaErrors(cudaMemcpyToSymbol(nPhiGlobal, &(this->nPhi), sizeof(size_t)));
     checkCudaErrors(cudaMemcpyToSymbol(nThetaGlobal, &(this->nTheta), sizeof(size_t)));
     checkCudaErrors(cudaMemcpyToSymbol(radiusGlobal, &(this->radius), sizeof(fReal)));
+    checkCudaErrors(cudaMemcpyToSymbol(invRadiusGlobal, &(this->invRadius), sizeof(fReal)));
     checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &(this->dt), sizeof(fReal)));
     checkCudaErrors(cudaMemcpyToSymbol(gridLenGlobal, &(this->gridLen), sizeof(fReal)));
 
