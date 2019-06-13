@@ -14,8 +14,8 @@ int main(int argc, char** argv)
 	    fReal rm; size_t nTheta; fReal particleDensity;
 	    float dt; float DT; int frames;
 	    float A; int B; int C; int D; int E;
-	    std::string gridPath; std::string particlePath;
-	    std::string densityImage; std::string solidImage; std::string colorImage;
+	    std::string thicknessPath; std::string particlePath;
+	    std::string thicknessImage; std::string solidImage; std::string colorImage;
 	    std::string attrib;
 
 	    fin >> attrib;  fin >> r;
@@ -41,15 +41,15 @@ int main(int argc, char** argv)
 	fin >> attrib;  fin >> C;
 	fin >> attrib;  fin >> D;
 	fin >> attrib;  fin >> E;
-	fin >> attrib; 	fin >> gridPath;
+	fin >> attrib; 	fin >> thicknessPath;
 	fin >> attrib; 	fin >> particlePath;
 
 	std::cout << nTheta << std::endl;
 
-	fin >> densityImage;
-	if (densityImage == "null")
+	fin >> attrib; 	fin >> thicknessImage;
+	if (thicknessImage == "null")
 	    {
-		densityImage = "";
+		thicknessImage = "";
 	    }
 	fin >> solidImage;
 	if (solidImage == "null")
@@ -64,7 +64,7 @@ int main(int argc, char** argv)
 
 	Kamino KaminoInstance(r, H, U, c_m, Gamma_m, sigma_a, R, T, rho, mu, Ds, g, rm,
 			      nTheta, particleDensity, dt, DT, frames, A, B, C, D, E,
-			      gridPath, particlePath, densityImage, solidImage, colorImage);
+			      thicknessPath, particlePath, thicknessImage, solidImage, colorImage);
 	KaminoInstance.run();
 	return 0;
 	}

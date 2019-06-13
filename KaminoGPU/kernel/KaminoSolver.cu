@@ -1,6 +1,7 @@
 # include "../include/KaminoSolver.cuh"
 # include "../opencv_headers/opencv2/opencv.hpp"
 # include "../include/KaminoTimer.cuh"
+# include "../include/tinyexr.h"
 
 // CONSTRUCTOR / DESTRUCTOR >>>>>>>>>>
 
@@ -67,7 +68,9 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 			   				   
 
     initialize_velocity();
-    initWithConst(this->thickness, 1.0);
+    // initWithConst(this->velPhi, 0.0);
+    // initWithConst(this->velTheta, 0.0);
+    // initWithConst(this->thickness, 1.0);
     initWithConst(this->bulkConcentration, 1.0);
     initWithConst(this->surfConcentration, 1.0);
 
@@ -111,15 +114,15 @@ KaminoSolver::~KaminoSolver()
     checkCudaErrors(cudaDeviceReset());
 
 # ifdef PERFORMANCE_BENCHMARK
-    float totalTimeUsed = this->advectionTime + this->geometricTime + this->projectionTime + this->bodyforceTime;
+    float totalTimeUsed = this->advectionTime + this->geometricTime/* + this->projectionTime*/ + this->bodyforceTime;
     std::cout << "Total time used for advection : " << this->advectionTime << std::endl;
     std::cout << "Total time used for geometric : " << this->geometricTime << std::endl;
     std::cout << "Total time used for body force : " << this->bodyforceTime << std::endl;
-    std::cout << "Total time used for projection : " << this->projectionTime << std::endl;
+    // std::cout << "Total time used for projection : " << this->projectionTime << std::endl;
     std::cout << "Percentage of advection : " << advectionTime / totalTimeUsed * 100.0f << "%" << std::endl;
     std::cout << "Percentage of geometric : " << geometricTime / totalTimeUsed * 100.0f << "%" << std::endl;
     std::cout << "Percentage of bodyforce : " << bodyforceTime / totalTimeUsed * 100.0f << "%" << std::endl;
-    std::cout << "Percentage of projection : " << projectionTime / totalTimeUsed * 100.0f << "%" << std::endl;
+    // std::cout << "Percentage of projection : " << projectionTime / totalTimeUsed * 100.0f << "%" << std::endl;
 # endif
 }
 
@@ -237,10 +240,10 @@ void KaminoSolver::stepForward(fReal timeStep)
     this->bodyforceTime += timer.stopTimer() * 0.001f;
     timer.startTimer();
 # endif
-    projection();
-# ifdef PERFORMANCE_BENCHMARK
-    this->projectionTime += timer.stopTimer() * 0.001f;
-# endif
+//     projection();
+// # ifdef PERFORMANCE_BENCHMARK
+//     this->projectionTime += timer.stopTimer() * 0.001f;
+// # endif
 
     this->timeElapsed += timeStep;
 }
@@ -264,9 +267,9 @@ void KaminoSolver::copyDensityBack2CPU()
 
 void KaminoSolver::initWithConst(KaminoQuantity* attrib, fReal val)
 {
-    for (size_t i = 0; i < nPhi; ++i)
+    for (size_t i = 0; i < attrib->getNPhi(); ++i)
 	{
-	    for (size_t j = 0; j < nTheta; ++j)
+	    for (size_t j = 0; j < attrib->getNTheta(); ++j)
 		{
 		    attrib->setCPUValueAt(i, j, val);
 		}
@@ -274,7 +277,7 @@ void KaminoSolver::initWithConst(KaminoQuantity* attrib, fReal val)
     attrib->copyToGPU();
 }
 
-void KaminoSolver::initDensityfromPic(std::string path)
+void KaminoSolver::initThicknessfromPic(std::string path)
 {
     if (path == "")
 	{
@@ -282,9 +285,10 @@ void KaminoSolver::initDensityfromPic(std::string path)
 	}
     cv::Mat image_In;
     image_In = cv::imread(path, cv::IMREAD_COLOR);
+    std::cout << path << std::endl;
     if (!image_In.data)
 	{
-	    std::cerr << "No density image provided." << std::endl;
+	    std::cerr << "No thickness image provided." << std::endl;
 	    return;
 	}
 
@@ -294,6 +298,9 @@ void KaminoSolver::initDensityfromPic(std::string path)
     cv::Mat image_Resized;
     cv::Size size(nPhi, nTheta);
     cv::resize(image_Flipped, image_Resized, size);
+    // cv::namedWindow( "window", cv::WINDOW_AUTOSIZE );
+    // cv::imshow("window", image_Resized);
+    // cv::waitKey(0);
 
     for (size_t i = 0; i < nPhi; ++i)
 	{
@@ -303,16 +310,82 @@ void KaminoSolver::initDensityfromPic(std::string path)
 		    fReal B = p->x / 255.0; // B
 		    fReal G = p->y / 255.0; // G
 		    fReal R = p->z / 255.0; // R
-		    this->density->setCPUValueAt(i, j, (B + G + R) / 3.0);
+		    this->thickness->setCPUValueAt(i, j, (B + G + R) / 3.0);
 		}
 	}
 
-    this->density->copyToGPU();
+    this->thickness->copyToGPU();
 }
 
 void KaminoSolver::initParticlesfromPic(std::string path, size_t parPerGrid)
 {
     this->particles = new KaminoParticles(path, parPerGrid, gridLen, nTheta);
+}
+
+void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
+{
+    std::string file_string = s + std::to_string(frame) + ".exr";
+    const char *filename = file_string.c_str();
+
+    thickness->copyBackToCPU();
+    
+    EXRHeader header;
+    InitEXRHeader(&header);
+
+    EXRImage image;
+    InitEXRImage(&image);
+
+    image.num_channels = 3;
+
+    std::vector<float> images[3];
+    images[0].resize(nPhi * nTheta);
+    images[1].resize(nPhi * nTheta);
+    images[2].resize(nPhi * nTheta);
+
+    for (size_t j = 0; j < nTheta; ++j) {
+	for (size_t i = 0; i < nPhi; ++i) {	   
+	    images[0][j*nPhi+i] = thickness->getCPUValueAt(i, j);
+	    images[1][j*nPhi+i] = thickness->getCPUValueAt(i, j);
+	    images[2][j*nPhi+i] = thickness->getCPUValueAt(i, j);
+	}
+    }
+
+    float* image_ptr[3];
+    image_ptr[0] = &(images[2].at(0)); // B
+    image_ptr[1] = &(images[1].at(0)); // G
+    image_ptr[2] = &(images[0].at(0)); // R
+
+    image.images = (unsigned char**)image_ptr;
+    image.width = nPhi;
+    image.height = nTheta;
+
+    header.num_channels = 3;
+    header.channels = (EXRChannelInfo *)malloc(sizeof(EXRChannelInfo) * header.num_channels); 
+    // Must be (A)BGR order, since most of EXR viewers expect this channel order.
+    strncpy(header.channels[0].name, "B", 255); header.channels[0].name[strlen("B")] = '\0';
+    strncpy(header.channels[1].name, "G", 255); header.channels[1].name[strlen("G")] = '\0';
+    strncpy(header.channels[2].name, "R", 255); header.channels[2].name[strlen("R")] = '\0';
+
+    header.pixel_types = (int *)malloc(sizeof(int) * header.num_channels); 
+    header.requested_pixel_types = (int *)malloc(sizeof(int) * header.num_channels);
+    for (int i = 0; i < header.num_channels; i++) {
+      header.pixel_types[i] = TINYEXR_PIXELTYPE_FLOAT; // pixel type of input image
+      header.requested_pixel_types[i] = TINYEXR_PIXELTYPE_HALF; // pixel type of output image to be stored in .EXR
+    }
+
+    const char* err = NULL; // or nullptr in C++11 or later.
+    int ret = SaveEXRImageToFile(&image, &header, filename, &err);
+    if (ret != TINYEXR_SUCCESS) {
+      fprintf(stderr, "Save EXR err: %s\n", err);
+      FreeEXRErrorMessage(err); // free's buffer for an error message
+      return;
+    }
+    printf("Saved exr file. [ %s ] \n", filename);
+
+    free(header.channels);
+    free(header.pixel_types);
+    free(header.requested_pixel_types);
+
 }
 
 void KaminoSolver::write_data_bgeo(const std::string& s, const int frame)

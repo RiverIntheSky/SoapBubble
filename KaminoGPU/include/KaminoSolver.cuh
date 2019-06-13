@@ -109,11 +109,12 @@ public:
     ~KaminoSolver();
 
     void initWithConst(KaminoQuantity* attrib, fReal val);
-    void initDensityfromPic(std::string path);
+    void initThicknessfromPic(std::string path);
     void initParticlesfromPic(std::string path, size_t parPergrid);
 
     void stepForward(fReal timeStep);
 
+    void write_thickness_img(const std::string& s, const int frame);
     void write_data_bgeo(const std::string& s, const int frame);
     void write_particles_bgeo(const std::string& s, const int frame);
 

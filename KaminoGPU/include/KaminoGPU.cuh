@@ -46,12 +46,12 @@ private:
     fReal A;
     int B, C, D, E;
     
-    std::string gridPath;       // folder destination for test bgeo files
-    std::string particlePath;   // folder destination for simulation bgeo files
+    std::string thicknessPath;	  // folder destination thickness output
+    std::string particlePath;     // folder destination for simulation bgeo files
 
-    std::string densityImage;   // file path of density image map
-    std::string solidImage;     // file path of SOLIDCELL image map
-    std::string colorImage;     // file path of image defining particle color
+    std::string thicknessImage;	  // file path of thickness image initialization
+    std::string solidImage;	  // file path of SOLIDCELL image map
+    std::string colorImage;       // file path of image defining particle color
 
 
     vec3* colorMap;
@@ -63,8 +63,8 @@ public:
 	   fReal rm = 0.000000005,size_t nTheta = 128, fReal particleDensity = 200.0,
 	   float dt = 0.005, float DT = 1.0 / 24.0, int frames = 1000,
 	   fReal A = 0.0, int B = 1, int C = 1, int D = 1, int E = 1,
-	   std::string gridPath = "output/frame", std::string particlePath = "particles/frame",
-	   std::string densityImage = "", std::string solidImage = "", std::string colorImage = "");
+	   std::string thicknessPath = "output/frame", std::string particlePath = "particles/frame",
+	   std::string thicknessImage = "", std::string solidImage = "", std::string colorImage = "");
     ~Kamino();
 
     /* run the solver */

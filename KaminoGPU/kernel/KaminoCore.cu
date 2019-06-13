@@ -414,8 +414,8 @@ void KaminoSolver::advection()
     determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
     advectionAllCentered<<<gridLayout, blockLayout>>>
 	(thickness->getGPUNextStep(), bulkConcentration->getGPUNextStep(), surfConcentration->getGPUNextStep(),
-	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), thickness->getGPUThisStep(),
-	 bulkConcentration->getGPUThisStep(), surfConcentration->getGPUThisStep(), thickness->getNextStepPitchInElements());	
+	 thickness->getGPUThisStep(), bulkConcentration->getGPUThisStep(), surfConcentration->getGPUThisStep(),
+	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), thickness->getNextStepPitchInElements());	
     thickness->swapGPUBuffer();
     surfConcentration->swapGPUBuffer();
     bulkConcentration->swapGPUBuffer();
@@ -619,7 +619,7 @@ void KaminoSolver::geometric()
 
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
     // does this has nothing with pressure to do, but only a place-holder?
-    geometricFillKernel<<<gridLayout, blockLayout>>>
+    geometricFillKernel<<<gridLayout, blockLayout>>> 
 	(pressure->getGPUThisStep(), pressure->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(),
 	 pressure->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
@@ -743,12 +743,12 @@ void KaminoSolver::bodyforce()
     checkCudaErrors(cudaDeviceSynchronize());
 
     applyforceThickness<<<gridLayout, blockLayout>>>
-	(thickness->getGPUNextStep(), thickness->getGPUThisStep(), div, thickness->getNextStepPitchInElements());
+    	(thickness->getGPUNextStep(), thickness->getGPUThisStep(), div, thickness->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
     applyforceSurfConcentration<<<gridLayout, blockLayout>>>
-	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(), div, surfConcentration->getNextStepPitchInElements());
+    	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(), div, surfConcentration->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 }
@@ -1014,8 +1014,8 @@ Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
 	       fReal sigma_a, fReal R, fReal T, fReal rho, fReal mu,
 	       fReal Ds, fReal g,  fReal rm, size_t nTheta, fReal particleDensity,
 	       float dt, float DT, int frames, fReal A, int B, int C, int D, int E,
-	       std::string gridPath, std::string particlePath,
-	       std::string densityImage, std::string solidImage, std::string colorImage) :
+	       std::string thicknessPath, std::string particlePath,
+	       std::string thicknessImage, std::string solidImage, std::string colorImage) :
     radius(radius), H(H), U(U), c_m(c_m), Gamma_m(Gamma_m), sigma_a(sigma_a), R(R), T(T),
     rho(rho), mu(mu), Ds(Ds), g(g/(U*U)), rm(rm), epsilon(H), sigma_r(R*T),
     M(Gamma_m*R*T/(3*rho*H*U*U)), S(sigma_a*H/(2*mu*U)), re(mu/(rho*U)),
@@ -1023,9 +1023,11 @@ Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
     gridLen(M_PI / nTheta), particleDensity(particleDensity),
     dt(dt), DT(DT), frames(frames),
     A(A), B(B), C(C), D(D), E(E),
-    gridPath(gridPath), particlePath(particlePath),
-    densityImage(densityImage), solidImage(solidImage), colorImage(colorImage)
+    thicknessPath(thicknessPath), particlePath(particlePath),
+    thicknessImage(thicknessImage), solidImage(solidImage), colorImage(colorImage)
 {
+    std::cout << "Re^-1 " << re << std::endl;
+    std::cout << "S " << S << std::endl;
 }
 
 Kamino::~Kamino()
@@ -1034,7 +1036,7 @@ Kamino::~Kamino()
 void Kamino::run()
 {
     KaminoSolver solver(nPhi, nTheta, radius, dt, A, B, C, D, E);
-    solver.initDensityfromPic(densityImage);
+    solver.initThicknessfromPic(thicknessImage);
 # ifdef WRITE_PARTICLES
     solver.initParticlesfromPic(colorImage, this->particleDensity);
 # endif
@@ -1045,6 +1047,9 @@ void Kamino::run()
     checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &(this->dt), sizeof(fReal)));
     checkCudaErrors(cudaMemcpyToSymbol(gridLenGlobal, &(this->gridLen), sizeof(fReal)));
 
+# ifdef WRITE_THICKNESS_DATA
+   solver.write_thickness_img(thicknessPath, 0);
+# endif  
 # ifdef WRITE_VELOCITY_DATA
     solver.write_data_bgeo(gridPath, 0);
 # endif
@@ -1069,6 +1074,9 @@ void Kamino::run()
 	    T = i*DT;
 
 	    std::cout << "Frame " << i << " is ready" << std::endl;
+# ifdef WRITE_THICKNESS_DATA
+	    solver.write_thickness_img(thicknessPath, i);
+# endif	   
 # ifdef WRITE_VELOCITY_DATA
 	    solver.write_data_bgeo(gridPath, i);
 # endif
