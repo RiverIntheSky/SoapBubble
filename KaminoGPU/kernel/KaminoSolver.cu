@@ -68,8 +68,8 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 			   				   
 
     initWithConst(this->velPhi, 0.0);
-    initialize_velocity();
-    //initWithConst(this->velTheta, 0.0);
+    // initialize_velocity();
+    initWithConst(this->velTheta, 0.0);
     // initWithConst(this->thickness, 1.0);
     initWithConst(this->bulkConcentration, 1.0);
     initWithConst(this->surfConcentration, 1.0);
@@ -94,7 +94,7 @@ KaminoSolver::~KaminoSolver()
     checkCudaErrors(cudaFree(gpuFZeroComponent));
 
     checkCudaErrors(cudaFree(div));
-	
+		    
     checkCudaErrors(cudaFree(gpuA));
     checkCudaErrors(cudaFree(gpuB));
     checkCudaErrors(cudaFree(gpuC));
@@ -230,11 +230,11 @@ void KaminoSolver::stepForward(fReal timeStep)
     this->advectionTime += timer.stopTimer() * 0.001f;
     timer.startTimer();
 # endif
-    geometric();
-# ifdef PERFORMANCE_BENCHMARK
-    this->geometricTime += timer.stopTimer() * 0.001f;
-    timer.startTimer();
-# endif
+//     geometric();		
+// # ifdef PERFORMANCE_BENCHMARK
+//     this->geometricTime += timer.stopTimer() * 0.001f;
+//     timer.startTimer();
+// # endif
     bodyforce();
 # ifdef PERFORMANCE_BENCHMARK
     this->bodyforceTime += timer.stopTimer() * 0.001f;
@@ -322,7 +322,13 @@ void KaminoSolver::initParticlesfromPic(std::string path, size_t parPerGrid)
 
 void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 {
-    std::string file_string = s + std::to_string(frame) + ".exr";
+    std::string file_string = std::to_string(frame);
+    while (file_string.length() < 4) {
+	file_string.insert(0, "0");
+    }
+    file_string.insert(0, s);
+    file_string.append(".exr");
+    
     const char *filename = file_string.c_str();
 
     thickness->copyBackToCPU();

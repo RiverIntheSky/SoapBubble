@@ -8,6 +8,11 @@ static __constant__ fReal invRadiusGlobal;
 static __constant__ fReal radiusGlobal;
 static __constant__ fReal timeStepGlobal;
 static __constant__ fReal gridLenGlobal;
+static __constant__ fReal invGridLenGlobal;
+static __constant__ fReal SGlobal;
+static __constant__ fReal MGlobal;
+static __constant__ fReal reGlobal;
+static __constant__ fReal gGlobal;
 
 // why flip? there is nothing north to the north pole
 __device__ fReal validateCoord(fReal& phi, fReal& theta)
@@ -400,7 +405,7 @@ void KaminoSolver::advection()
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
     advectionVPhiKernel<<<gridLayout, blockLayout>>>
-	(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velPhi->getNextStepPitchInElements());
+	(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velPhi->getNextStepPitchInElements());    
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
@@ -459,7 +464,7 @@ __device__ fReal root3(double x)
 	return 0.0;
 }
 
-#define eps 1e-7f
+#define eps 1e-12f
 
 __device__ fReal solveCubic(fReal a, fReal b, fReal c)
 {
@@ -507,6 +512,7 @@ __global__ void geometricFillKernel
     int gridPhiId = threadIdx.x + threadSequence * blockDim.x;
     int gridThetaId = blockIdx.x / splitVal;
     // Coord in phi-theta space
+    fReal gPhi = ((fReal)gridPhiId + centeredPhiOffset) * gridLenGlobal;
     fReal gTheta = ((fReal)gridThetaId + centeredThetaOffset) * gridLenGlobal;
     // The factor
 
@@ -515,6 +521,7 @@ __global__ void geometricFillKernel
     // u = velPhi
     fReal uPrev = 0.5 * (velPhiInput[phiLeft + nPitchInElements * gridThetaId]
 			 + velPhiInput[phiRight + nPitchInElements * gridThetaId]);
+    fReal guPhi = sampleVPhi(velPhiInput, gPhi, gTheta, nPitchInElements);
 
     // v = velTheta	
     fReal vPrev;
@@ -683,6 +690,236 @@ __global__ void comDivergenceKernel
     div[gridThetaId * nPhiGlobal + gridPhiId] = f;
 }
 
+__global__ void applyforcevelthetaKernel
+(fReal* velThetaOutput, fReal* velThetaInput, fReal* velPhi, fReal* thickness,
+ fReal* concentration, fReal* divCentered, size_t pitch) {
+    int splitVal = nPhiGlobal / blockDim.x;
+    int threadSequence = blockIdx.x % splitVal;
+    int phiId = threadIdx.x + threadSequence * blockDim.x;
+    int thetaId = blockIdx.x / splitVal;
+
+    // Coord in phi-theta space
+    // fReal gPhi = ((fReal)phiId + vThetaPhiOffset) * gridLenGlobal;
+    fReal gTheta = ((fReal)thetaId + vThetaThetaOffset) * gridLenGlobal;
+
+    int thetaNorthId = thetaId;
+    int thetaSouthId = thetaId + 1;
+    int phiWestId = (phiId - 1 + nPhiGlobal) % nPhiGlobal;
+    int phiEastId = (phiId + 1) % nPhiGlobal;
+    
+    // -   +  v0 +  -
+    // d0  u0   u1  d1
+    // v3  +  v1 +  v4
+    // d2  u2   u3  d3
+    // -   +  v2 +  -
+    fReal u0 = velPhi[thetaId * pitch + phiId];
+    fReal u1 = velPhi[thetaId * pitch + phiEastId];
+    fReal u2 = velPhi[thetaSouthId * pitch + phiId];
+    fReal u3 = velPhi[thetaSouthId * pitch + phiEastId];
+
+    // values at centered grid
+    fReal divNorth = divCentered[thetaId * nPhiGlobal + phiId];
+    fReal divSouth = divCentered[thetaSouthId * nPhiGlobal + phiId];
+    fReal GammaNorth = concentration[thetaId * nPhiGlobal + phiId];
+    fReal GammaSouth = concentration[thetaSouthId * nPhiGlobal + phiId];
+    fReal DeltaNorth = thickness[thetaId * nPhiGlobal + phiId];
+    fReal DeltaSouth = thickness[thetaSouthId * nPhiGlobal + phiId];
+
+      // values at vTheta grid
+    fReal div = 0.5 * (divNorth + divSouth);
+    fReal Delta = 0.5 * (thickness[thetaId * pitch + phiId] +
+		       thickness[(thetaId + 1) * pitch + phiId]);
+    fReal uPhi = 0.25 * (u0 + u1 + u2 + u3);
+
+    // pDpx = \frac{\partial\Delta}{\partial\phi}
+    fReal d0 = thickness[thetaNorthId * pitch + phiWestId];
+    fReal d1 = thickness[thetaNorthId * pitch + phiEastId];
+    fReal d2 = thickness[thetaSouthId * pitch + phiWestId];
+    fReal d3 = thickness[thetaSouthId * pitch + phiEastId];
+    fReal pDpx = 0.25 * invGridLenGlobal * (d1 + d3 - d0 - d2);
+    fReal pDpy = invGridLenGlobal * (DeltaSouth - DeltaNorth);
+
+    // pvpy = \frac{\partial u_theta}{\partial\theta}
+    fReal v0 = 0.0;
+    fReal v1 = velThetaInput[thetaId * pitch + phiId];
+    fReal v2 = 0.0;
+    fReal v3 = velThetaInput[thetaId * pitch + phiWestId];
+    fReal v4 = velThetaInput[thetaId * pitch + phiEastId];
+    if (thetaId != 0) {
+	int thetaNorthId = thetaId - 1;
+	v0 = velThetaInput[thetaNorthId * pitch + phiId];
+    }
+    if (thetaId != nThetaGlobal - 2) {
+	int thetaSouthId = thetaId + 1;
+	v2 = velThetaInput[thetaSouthId * pitch + phiId];
+    }   
+    fReal pvpy = 0.5 * invGridLenGlobal * (v2 - v0);
+    fReal pvpyNorth = invGridLenGlobal * (v1 - v0);
+    fReal pvpySouth = invGridLenGlobal * (v2 - v1);
+	
+    // pvpx = \frac{\partial u_theta}{\partial\phi}    
+    fReal pvpx = 0.5 * invGridLenGlobal * (v4 - v3);
+    
+    // pupy = \frac{\partial u_phi}{\partial\theta}
+    fReal pupy = 0.5 * invGridLenGlobal * (u2 + u3 - u0 - u1);
+
+    // pupx = \frac{\partial u_phi}{\partial\phi}
+    fReal pupx = 0.5 * invGridLenGlobal * (u1 + u3 - u0 - u2);
+
+    // pupxy = \frac{\partial^2u_\phi}{\partial\theta\partial\phi}
+    fReal pupxy = 0.25 * invGridLenGlobal * invGridLenGlobal * (u0 + u3 - u1 - u2);
+
+    // pvpxx = \frac{\partial^2u_\theta}{\partial\phi^2}    
+    fReal pvpxx = invGridLenGlobal * invGridLenGlobal * (v3 + v4 - 2 * v1);
+    
+    // trigonometric function
+    fReal sinTheta = sinf(gTheta);
+    fReal cscTheta = 1. / sinTheta;
+    fReal cosTheta = cosf(gTheta);
+    fReal cotTheta = cosTheta * cscTheta;
+
+    // stress
+    // TODO: laplace term
+    fReal sigma11North = 0. +  2 * (invRadiusGlobal * pvpyNorth + divNorth);
+    fReal sigma11South = 0. +  2 * (invRadiusGlobal * pvpySouth + divSouth);
+    
+    // fReal sigma11 = 0. +  2 * invRadiusGlobal * pvpy + 2 * div;
+    fReal sigma22 = -2 * invRadiusGlobal * pvpy + 4 * div;
+    fReal sigma12 = invRadiusGlobal * (cscTheta * pvpx + pupy - uPhi * cotTheta);
+    // fReal sigma12West;
+    // fReal sigma12East;
+
+    // psspy = \frac{\partial}{\partial\theta}(\sin\theta\sigma_{11})
+    fReal halfStep = 0.5 * gridLenGlobal;    
+    fReal thetaSouth = gTheta + halfStep;
+    fReal thetaNorth = gTheta - halfStep;    
+    fReal sinNorth = sinf(thetaNorth);
+    fReal sinSouth = sinf(thetaSouth);    
+    fReal psspy = invGridLenGlobal * (sigma11South * sinSouth - sigma11North * sinNorth);
+    
+    // pspx = \frac{\partial\sigma_{12}}{\partial\phi}
+    fReal pspx = invRadiusGlobal * (cscTheta * pvpxx + pupxy - cotTheta * pupx);
+
+    // pGpy = \frac{\partial\Gamma}{\partial\theta};
+    fReal pGpy = invGridLenGlobal * (GammaSouth - GammaNorth);
+
+    // force terms
+    fReal invDelta = 1. / Delta;
+    fReal f1 = uPhi * uPhi * cotTheta * invRadiusGlobal;
+    fReal f2 = reGlobal * invRadiusGlobal * cscTheta * invDelta * pDpx * sigma12;
+    fReal f3 = -2 * MGlobal * invDelta * invRadiusGlobal * pGpy;
+    fReal f4 = reGlobal * invDelta * invRadiusGlobal * pDpy * 2 * (div + invRadiusGlobal * pvpy);
+    fReal f5 = reGlobal * invRadiusGlobal * cscTheta * (psspy + pspx - cosTheta * sigma22);
+    fReal f6 = gGlobal * sinTheta;
+    // fReal f7 = 0.0; 		// Van der Waals
+    
+    // output
+    velThetaOutput[thetaId * pitch + phiId] = velThetaInput[thetaId * pitch + phiId]
+	+ timeStepGlobal * (f1 + f2 + f3 + f4 + f5 + f6);
+}
+
+// __global__ void applyforcevelKernel
+// (fReal* intermediateVelThetaOutput, fReal* intermediateVelPhiOutput, fReal* velPhiInput, fReal* velThetaInput, fReal* div, size_t, velPhiPitchInElements, size_t velThetaPitchInElements)
+// {
+//     int splitVal = nPhiGlobal / blockDim.x;
+//     int threadSequence = blockIdx.x % splitVal;
+//     int phiId = threadIdx.x + threadSequence * blockDim.x;
+//     int thetaId = blockIdx.x / splitVal;
+    
+//     // Coord in phi-theta space
+//     fReal gPhi = ((fReal)phiId + centeredPhiOffset) * gridLenGlobal;
+//     fReal gTheta = ((fReal)thetaId + centeredThetaOffset) * gridLenGlobal;
+
+//     //      u0   u3
+//     // + v0 + v1 + v2 
+//     //      u1 c u4  
+//     // + v3 + v4 + v5
+//     //      u2   u5
+//     fReal v0 = 0.0;
+//     fReal v1 = 0.0;
+//     fReal v2 = 0.0;
+//     fReal v3 = 0.0;
+//     fReal v4 = 0.0;
+//     fReal v5 = 0.0;
+//     fReal u0 = 0.0;
+//     fReal u1 = 0.0;
+//     fReal u2 = 0.0;
+//     fReal u3 = 0.0;
+//     fReal u4 = 0.0;
+//     fReal u5 = 0.0;
+//     if (thetaId != 0) {
+// 	int thetaNorthIdx = thetaId - 1;
+// 	v0 = velTheta[thetaNorthIdx * velThetaPitchInElements + (phiId-1+nPhiGlobal) % nPhiGlobal];
+// 	v1 = velTheta[thetaNorthIdx * velThetaPitchInElements + phiId];
+// 	v2 = velTheta[thetaNorthIdx * velThetaPitchInElements + (phiId+1) % nPhiGlobal];
+// 	u0 = velPhi[thetaNorthId * velThetaPitchInElements + phiId];
+// 	u3 = velPhi[thetaNorthId * velThetaPitchInElements + (phiId+1) % nPhiGlobal];
+//     }
+//     if (thetaId != nThetaGlobal - 1) {
+// 	int thetaSouthIdx = thetaId;
+// 	v3 = velTheta[thetaSouthIdx * velThetaPitchInElements + (phiId-1+nPhiGlobal) % nPhiGlobal];
+// 	v4 = velTheta[thetaSouthIdx * velThetaPitchInElements + phiId];
+// 	v5 = velTheta[thetaSouthIdx * velThetaPitchInElements + (phiId+1) % nPhiGlobal];
+// 	u2 = velTheta[thetaSouthIdx * velThetaPitchInElements + phiId];
+// 	u5 = velTheta[thetaSouthIdx * velThetaPitchInElements + (phiId+1) % nPhiGlobal];
+//     }
+//     u1 = velPhi[thetaId * velThetaPitchInElements + phiId];
+//     u4 = velPhi[thetaId * velThetaPitchInElements + (phiId+1) % nPhiGlobal];
+//     fReal uc = 0.5 * (u1 + u4);
+//     fReal invGridLen = 1 / gridLenGlobal;
+
+//     // pvpy = \frac{\partial u_theta}{\partial theta}
+//     fReal pvpy = invGridLen * (v4 - v1);
+//     // pvpx = \frac{\partial u_theta}{\partial phi}
+//     fReal pvpx = invGridLen * 0.25 * (v2 + v5 - v0 - v3);
+//     // pupy = \frac{\partial u_phi}{\partial theta}
+//     fReal pupy = 0.0;
+//     if (thetaId == 0) {
+// 	pupy = invGridLen * 0.25 * (u1 + u2 + u4 + u5);
+//     } else if (thetaId == nThetaGlobal -1) {
+// 	pupy = -invGridLen * 0.25 * (u0 + u1 + u3 + u4);
+//     } else {
+// 	pupy = invGridLen * 0.25 * (u2 + u5 - u0 - u3);
+//     }
+
+//     // trigonometric function
+//     fReal cscTheta = 1. / sinf(gTheta);
+//     fReal cosTheta = cosf(gTheta);
+//     fReal cotTheta = cosTheta * cscTheta;
+    
+//     // stress
+//     fReal sigma11 = 2 * dvdy * invRadiusGlobal + 2 * div[thetaId * nPhiGlobal + phiId];
+//     fReal sigma22 = -2 * dvdy * invRadiusGlobal + 4 * div[thetaId * nPhiGlobal + phiId];
+//     fReal sigma12 = invRadiusGlobal * cscTheta * pvpx + invRadiusGlobal * pupy - invRadiusGlobal * cotTheta * uc;
+	
+//     // Sample the speed
+//     fReal guPhi = sampleVPhi(velPhi, gPhi, gTheta, nPitchInElements);
+
+//     fReal thetaF1 = guPhi * guPhi * invRadiusGlobal / tanf(gTheta);
+    
+//     velThetaOutput[thetaId * nPhiGlobal + phiId] = f * timeStepGlobal + velThetaInput[thetaId * nPhiGlobal + phiId];
+// }
+
+__global__ void applyforcephiKernel
+(fReal* velPhiOutput, fReal* velTheta, fReal* velPhiInput, size_t nPitchInElements)
+{
+    int splitVal = nPhiGlobal / blockDim.x;
+    int threadSequence = blockIdx.x % splitVal;
+    int phiId = threadIdx.x + threadSequence * blockDim.x;
+    int thetaId = blockIdx.x / splitVal;
+    
+    // Coord in phi-theta space
+    fReal gPhi = ((fReal)phiId + vPhiPhiOffset) * gridLenGlobal;
+    fReal gTheta = ((fReal)thetaId + vPhiThetaOffset) * gridLenGlobal;
+
+    // Sample the speed
+    fReal guPhi = sampleVPhi(velPhiInput, gPhi, gTheta, nPitchInElements);
+    fReal guTheta = sampleVTheta(velTheta, gPhi, gTheta, nPitchInElements);
+
+    fReal f = -guTheta * guPhi * invRadiusGlobal / tanf(gTheta);
+    velPhiOutput[thetaId * nPhiGlobal + phiId] = f * timeStepGlobal + velPhiInput[thetaId * nPhiGlobal + phiId];
+}
+
 __global__ void applyforceThickness
 (fReal* thicknessOutput, fReal* thicknessInput, fReal* div, size_t nPitchInElements)
 {
@@ -693,9 +930,8 @@ __global__ void applyforceThickness
     int thetaId = blockIdx.x / splitVal;
 
     fReal f = -div[thetaId * nPhiGlobal + phiId];
-    fReal factor = timeStepGlobal / radiusGlobal;
     // TODO: before or after advection??? Or implicit???
-    thicknessOutput[thetaId * nPhiGlobal + phiId] = f * factor * thicknessOutput[thetaId * nPhiGlobal + phiId] 
+    thicknessOutput[thetaId * nPhiGlobal + phiId] = f * timeStepGlobal * thicknessInput[thetaId * nPhiGlobal + phiId] 
 	+ thicknessInput[thetaId * nPhiGlobal + phiId];
 }
 
@@ -710,8 +946,7 @@ __global__ void applyforceSurfConcentration
 
     // TODO: add diffusivity
     fReal f = -div[thetaId * nPhiGlobal + phiId];
-    fReal factor = timeStepGlobal / radiusGlobal;
-    sConcentrationOutput[thetaId * nPhiGlobal + phiId] = f * factor * sConcentrationOutput[thetaId * nPhiGlobal + phiId]
+    sConcentrationOutput[thetaId * nPhiGlobal + phiId] = f * timeStepGlobal * sConcentrationInput[thetaId * nPhiGlobal + phiId]
 	+ sConcentrationInput[thetaId * nPhiGlobal + phiId];
 }
 
@@ -726,15 +961,35 @@ void KaminoSolver::bodyforce()
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
+    determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());    
     applyforceThickness<<<gridLayout, blockLayout>>>
     	(thickness->getGPUNextStep(), thickness->getGPUThisStep(), div, thickness->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
+    determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
     applyforceSurfConcentration<<<gridLayout, blockLayout>>>
     	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(), div, surfConcentration->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
+
+    determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
+    applyforcevelthetaKernel<<<gridLayout, blockLayout>>>
+	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
+	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(), div,
+	 velTheta->getNextStepPitchInElements());
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
+
+    // determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
+    // applyforcephiKernel<<<gridLayout, blockLayout>>>
+    // 	(velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(), velPhi->getNextStepPitchInElements());
+    // checkCudaErrors(cudaGetLastError());
+    // checkCudaErrors(cudaDeviceSynchronize());
+    
+    thickness->swapGPUBuffer();
+    surfConcentration->swapGPUBuffer();
+    swapVelocityBuffers();
 }
 
 __global__ void fillDivergenceKernel
@@ -1004,7 +1259,7 @@ Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
     rho(rho), mu(mu), Ds(Ds), g(g/(U*U)), rm(rm), epsilon(H), sigma_r(R*T),
     M(Gamma_m*R*T/(3*rho*H*U*U)), S(sigma_a*H/(2*mu*U)), re(mu/(rho*U)),
     nTheta(nTheta), nPhi(2 * nTheta),
-    gridLen(M_PI / nTheta), particleDensity(particleDensity),
+    gridLen(M_PI / nTheta), invGridLen(nTheta / M_PI), particleDensity(particleDensity),
     dt(dt), DT(DT), frames(frames),
     A(A), B(B), C(C), D(D), E(E),
     thicknessPath(thicknessPath), particlePath(particlePath),
@@ -1032,6 +1287,11 @@ void Kamino::run()
     checkCudaErrors(cudaMemcpyToSymbol(invRadiusGlobal, &(this->invRadius), sizeof(fReal)));
     checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &(this->dt), sizeof(fReal)));
     checkCudaErrors(cudaMemcpyToSymbol(gridLenGlobal, &(this->gridLen), sizeof(fReal)));
+    checkCudaErrors(cudaMemcpyToSymbol(invGridLenGlobal, &(this->invGridLen), sizeof(fReal)));
+    checkCudaErrors(cudaMemcpyToSymbol(SGlobal, &(this->S), sizeof(fReal)));
+    checkCudaErrors(cudaMemcpyToSymbol(MGlobal, &(this->M), sizeof(fReal)));
+    checkCudaErrors(cudaMemcpyToSymbol(reGlobal, &(this->re), sizeof(fReal)));
+    checkCudaErrors(cudaMemcpyToSymbol(gGlobal, &(this->g), sizeof(fReal)));
 
 # ifdef WRITE_THICKNESS_DATA
    solver.write_thickness_img(thicknessPath, 0);

@@ -31,6 +31,7 @@ private:
     size_t nTheta;              // number of grid cells in u direction
     size_t nPhi;                // number of grid cells in v direction
     fReal gridLen;              // grid spacing (square in uv plane)
+    fReal invGridLen;		// inverted grid spacing
     fReal particleDensity;      // number of particles per unit area on the flat sphere
 
 
