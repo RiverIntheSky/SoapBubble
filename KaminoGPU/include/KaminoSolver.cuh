@@ -50,10 +50,13 @@ private:
     fReal gridLen;
     /* Inverted grid size*/
     fReal invGridLen;
+    /* Whether film is broken */
+    bool broken;
 
     /* harmonic coefficients for velocity field initializaton */
     fReal A;
     int B, C, D, E;
+    fReal H;
 
     /* So that it remembers all these attributes within */
     //std::map<std::string, KaminoQuantity*> centeredAttr;
@@ -107,7 +110,7 @@ private:
 			 size_t nRow_theta, size_t nCol_phi);
 public:
     KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
-		 fReal A, int B, int C, int D, int E);
+		 fReal A, int B, int C, int D, int E, fReal H);
     ~KaminoSolver();
 
     void initWithConst(KaminoQuantity* attrib, fReal val);
@@ -115,6 +118,8 @@ public:
     void initParticlesfromPic(std::string path, size_t parPergrid);
 
     void stepForward(fReal timeStep);
+    bool isBroken();
+    void setBroken(bool broken);
 
     void write_thickness_img(const std::string& s, const int frame);
     void write_data_bgeo(const std::string& s, const int frame);

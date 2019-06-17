@@ -11,10 +11,10 @@ static __constant__ size_t nThetaGlobal;
 static __constant__ fReal gridLenGlobal;
 
 KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
-			   fReal A, int B, int C, int D, int E) :
+			   fReal A, int B, int C, int D, int E, fReal H) :
     nPhi(nPhi), nTheta(nTheta), radius(radius), invRadius(1.0/radius), gridLen(M_2PI / nPhi), invGridLen(1.0 / gridLen), frameDuration(frameDuration),
     timeStep(0.0), timeElapsed(0.0), advectionTime(0.0), geometricTime(0.0), projectionTime(0.0),
-    A(A), B(B), C(C), D(D), E(E)
+    A(A), B(B), C(C), D(D), E(E), H(H)
 {
     /// FIXME: Should we detect and use device 0?
     /// Replace it later with functions from helper_cuda.h!
@@ -114,16 +114,12 @@ KaminoSolver::~KaminoSolver()
     checkCudaErrors(cudaDeviceReset());
 
 # ifdef PERFORMANCE_BENCHMARK
-    float totalTimeUsed = this->advectionTime + this->geometricTime/* + this->projectionTime*/ + this->bodyforceTime;
+    float totalTimeUsed = this->advectionTime + this->bodyforceTime;
     std::cout << "Total time used for advection : " << this->advectionTime << std::endl;
-    std::cout << "Total time used for geometric : " << this->geometricTime << std::endl;
     std::cout << "Total time used for body force : " << this->bodyforceTime << std::endl;
-    // std::cout << "Total time used for projection : " << this->projectionTime << std::endl;
     std::cout << "Percentage of advection : " << advectionTime / totalTimeUsed * 100.0f << "%" << std::endl;
-    std::cout << "Percentage of geometric : " << geometricTime / totalTimeUsed * 100.0f << "%" << std::endl;
     std::cout << "Percentage of bodyforce : " << bodyforceTime / totalTimeUsed * 100.0f << "%" << std::endl;
-    // std::cout << "Percentage of projection : " << projectionTime / totalTimeUsed * 100.0f << "%" << std::endl;
-# endif
+    # endif
 }
 
 void KaminoSolver::copyVelocity2GPU()
@@ -230,20 +226,11 @@ void KaminoSolver::stepForward(fReal timeStep)
     this->advectionTime += timer.stopTimer() * 0.001f;
     timer.startTimer();
 # endif
-//     geometric();		
-// # ifdef PERFORMANCE_BENCHMARK
-//     this->geometricTime += timer.stopTimer() * 0.001f;
-//     timer.startTimer();
-// # endif
     bodyforce();
 # ifdef PERFORMANCE_BENCHMARK
     this->bodyforceTime += timer.stopTimer() * 0.001f;
     timer.startTimer();
 # endif
-//     projection();
-// # ifdef PERFORMANCE_BENCHMARK
-//     this->projectionTime += timer.stopTimer() * 0.001f;
-// # endif
 
     this->timeElapsed += timeStep;
 }
@@ -273,6 +260,14 @@ void KaminoSolver::initWithConst(KaminoQuantity* attrib, fReal val)
 	    }
     }
     attrib->copyToGPU();
+}
+
+bool KaminoSolver::isBroken() {
+    return this->broken;
+}
+
+void KaminoSolver::setBroken(bool broken) {
+    this->broken = broken;
 }
 
 void KaminoSolver::initThicknessfromPic(std::string path)
@@ -347,10 +342,17 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
     images[2].resize(nPhi * nTheta);
 
     for (size_t j = 0; j < nTheta; ++j) {
-	for (size_t i = 0; i < nPhi; ++i) {	   
-	    images[0][j*nPhi+i] = thickness->getCPUValueAt(i, j);
-	    images[1][j*nPhi+i] = thickness->getCPUValueAt(i, j);
-	    images[2][j*nPhi+i] = thickness->getCPUValueAt(i, j);
+	for (size_t i = 0; i < nPhi; ++i) {
+	    fReal Delta = thickness->getCPUValueAt(i, j);
+	    if (Delta < 0) {
+		this->setBroken(true);
+		return;
+	    } else {
+		Delta = Delta * this->H * 5e5; // Delta = 1 <==> thickness = 2000nm
+		images[0][j*nPhi+i] = Delta;
+		images[1][j*nPhi+i] = Delta;
+		images[2][j*nPhi+i] = Delta;
+	    }
 	}
     }
 

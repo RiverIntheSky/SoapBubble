@@ -13,9 +13,9 @@ g 9.8
 rm 0.000000005
 numberOfGridsInTheta 256
 particleDensity 200.0
-timePerStep 0.00005
+timePerStep 0.000001
 timePerFrame 0.02
-frameNumbers 500
+frameNumbers 5000
 A 0.0
 B 1
 C 1
