@@ -97,7 +97,7 @@ __device__ fReal sampleVTheta(fReal* input, fReal phiRaw, fReal thetaRaw, size_t
     // Phi and Theta are now shifted back to origin
 
     fReal invGridLen = 1.0 / gridLenGlobal;
-    bool isFlippedPole = validateCoord(phi, theta);
+    fReal isFlippedPole = validateCoord(phi, theta);
     fReal normedPhi = phi * invGridLen;
     fReal normedTheta = theta * invGridLen;
 
@@ -147,7 +147,7 @@ __device__ fReal sampleCentered(fReal* input, fReal phiRaw, fReal thetaRaw, size
     // Phi and Theta are now shifted back to origin
 
     fReal invGridLen = 1.0 / gridLenGlobal;
-    bool isFlippedPole = validateCoord(phi, theta);
+    fReal isFlippedPole = validateCoord(phi, theta);
     fReal normedPhi = phi * invGridLen;
     fReal normedTheta = theta * invGridLen;
 
@@ -191,7 +191,7 @@ __device__ fReal sampleCentered(fReal* input, fReal phiRaw, fReal thetaRaw, size
 }
 
 __global__ void advectionVPhiKernel
-(fReal* attributeOutput, fReal* velPhi, fReal* velTheta, size_t nPitchInElements)
+(fReal* attributeOutput, fReal* velPhi, fReal* velTheta, size_t pitch)
 {
     // Index
     int splitVal = nPhiGlobal / blockDim.x;
@@ -203,11 +203,39 @@ __global__ void advectionVPhiKernel
     fReal gTheta = ((fReal)thetaId + vPhiThetaOffset) * gridLenGlobal;
 	
     // Sample the speed
-    fReal guPhi = sampleVPhi(velPhi, gPhi, gTheta, nPitchInElements);
-    fReal guTheta = sampleVTheta(velTheta, gPhi, gTheta, nPitchInElements);
-
-    fReal latRadius = radiusGlobal * sinf(gTheta);
-    fReal cofPhi = timeStepGlobal / latRadius;
+    //fReal guTheta = sampleVTheta(velTheta, gPhi, gTheta, pitch);
+    // fReal guPhi = sampleVPhi(velPhi, gPhi, gTheta, pitch);
+    int thetaNorthId = thetaId - 1;
+    int phiWestId = (phiId - 1 + nPhiGlobal) % nPhiGlobal;
+    fReal v0 = 0.0;
+    fReal v1 = 0.0;
+    fReal v2 = 0.0;
+    fReal v3 = 0.0;
+    if (thetaId != 0) {
+    	v0 = velTheta[thetaNorthId * pitch + phiWestId];
+    	v1 = velTheta[thetaNorthId * pitch + phiId];
+    } else {
+    	v0 = velTheta[thetaId * pitch + (phiWestId + nPhiGlobal / 2) % nPhiGlobal];
+    	v1 = velTheta[thetaId * pitch + (phiId + nPhiGlobal / 2) % nPhiGlobal];
+    }
+    if (thetaId != nThetaGlobal - 1) {
+    	v2 = velTheta[thetaId * pitch + phiWestId];
+    	v3 = velTheta[thetaId * pitch + phiId];
+    } else {
+    	v2 = velTheta[thetaNorthId * pitch + (phiWestId + nPhiGlobal / 2) % nPhiGlobal];
+    	v3 = velTheta[thetaNorthId * pitch + (phiId + nPhiGlobal / 2) % nPhiGlobal];
+    }
+    fReal guTheta = 0.0;
+    if (thetaId == 0) {	
+	guTheta = 0.125 * (v0 + v1) + 0.375 * (v2 + v3);
+     } else if (thetaId == nThetaGlobal - 1) {
+	guTheta = 0.375 * (v0 + v1) + 0.125 * (v2 + v3);
+    } else {
+     	guTheta = 0.25 * (v0 + v1 + v2 + v3);
+    }
+    fReal guPhi = velPhi[thetaId * pitch + phiId];
+       
+    fReal cofPhi = timeStepGlobal * invRadiusGlobal / sinf(gTheta);
     fReal cofTheta = timeStepGlobal * invRadiusGlobal;
 
     fReal deltaPhi = guPhi * cofPhi;
@@ -217,8 +245,8 @@ __global__ void advectionVPhiKernel
     // Traced halfway in phi-theta space
     fReal midPhi = gPhi - 0.5 * deltaPhi;
     fReal midTheta = gTheta - 0.5 * deltaTheta;
-    fReal muPhi = sampleVPhi(velPhi, midPhi, midTheta, nPitchInElements);
-    fReal muTheta = sampleVTheta(velTheta, midPhi, midTheta, nPitchInElements);
+    fReal muPhi = sampleVPhi(velPhi, midPhi, midTheta, pitch);
+    fReal muTheta = sampleVTheta(velTheta, midPhi, midTheta, pitch);
 
     fReal averuPhi = 0.5 * (muPhi + guPhi);
     fReal averuTheta = 0.5 * (muTheta + guTheta);
@@ -230,13 +258,13 @@ __global__ void advectionVPhiKernel
     fReal pPhi = gPhi - deltaPhi;
     fReal pTheta = gTheta - deltaTheta;
 
-    fReal advectedVal = sampleVPhi(velPhi, pPhi, pTheta, nPitchInElements);
+    fReal advectedVal = sampleVPhi(velPhi, pPhi, pTheta, pitch);
 
-    attributeOutput[thetaId * nPitchInElements + phiId] = advectedVal;
+    attributeOutput[thetaId * pitch + phiId] = advectedVal;
 };
 
 __global__ void advectionVThetaKernel
-(fReal* attributeOutput, fReal* velPhi, fReal* velTheta, size_t nPitchInElements)
+(fReal* attributeOutput, fReal* velPhi, fReal* velTheta, size_t pitch)
 {
     // Index
     int splitVal = nPhiGlobal / blockDim.x;
@@ -248,12 +276,19 @@ __global__ void advectionVThetaKernel
     fReal gTheta = ((fReal)thetaId + vThetaThetaOffset) * gridLenGlobal;
 
     // Sample the speed
-    fReal guPhi = sampleVPhi(velPhi, gPhi, gTheta, nPitchInElements);
-    fReal guTheta = sampleVTheta(velTheta, gPhi, gTheta, nPitchInElements);
-
-    fReal latRadius = radiusGlobal * sinf(gTheta);
-    fReal cofPhi = timeStepGlobal / latRadius;
-    fReal cofTheta = timeStepGlobal / radiusGlobal;
+    // fReal guPhi = sampleVPhi(velPhi, gPhi, gTheta, pitch);
+    // fReal guTheta = sampleVTheta(velTheta, gPhi, gTheta, pitch);  
+    int thetaSouthId = thetaId + 1;
+    int phiEastId = (phiId + 1) % nPhiGlobal;
+    fReal u0 = velPhi[thetaId * pitch + phiId];
+    fReal u1 = velPhi[thetaId * pitch + phiEastId];
+    fReal u2 = velPhi[thetaSouthId * pitch + phiId];
+    fReal u3 = velPhi[thetaSouthId * pitch + phiEastId];
+    fReal guPhi = 0.25 * (u0 + u1 + u2 + u3);
+    fReal guTheta = velTheta[thetaId * pitch + phiId];
+    
+    fReal cofPhi = timeStepGlobal * invRadiusGlobal / sinf(gTheta);
+    fReal cofTheta = timeStepGlobal * invRadiusGlobal;
 
     fReal deltaPhi = guPhi * cofPhi;
     fReal deltaTheta = guTheta * cofTheta;
@@ -262,8 +297,8 @@ __global__ void advectionVThetaKernel
     // Traced halfway in phi-theta space
     fReal midPhi = gPhi - 0.5 * deltaPhi;
     fReal midTheta = gTheta - 0.5 * deltaTheta;
-    fReal muPhi = sampleVPhi(velPhi, midPhi, midTheta, nPitchInElements);
-    fReal muTheta = sampleVTheta(velTheta, midPhi, midTheta, nPitchInElements);
+    fReal muPhi = sampleVPhi(velPhi, midPhi, midTheta, pitch);
+    fReal muTheta = sampleVTheta(velTheta, midPhi, midTheta, pitch);
 
     fReal averuPhi = 0.5 * (muPhi + guPhi);
     fReal averuTheta = 0.5 * (muTheta + guTheta);
@@ -275,9 +310,9 @@ __global__ void advectionVThetaKernel
     fReal pPhi = gPhi - deltaPhi;
     fReal pTheta = gTheta - deltaTheta;
 
-    fReal advectedVal = sampleVTheta(velTheta, pPhi, pTheta, nPitchInElements);
+    fReal advectedVal = sampleVTheta(velTheta, pPhi, pTheta, pitch);
 
-    attributeOutput[thetaId * nPitchInElements + phiId] = advectedVal;
+    attributeOutput[thetaId * pitch + phiId] = advectedVal;
 }
 
 __global__ void advectionCentered
