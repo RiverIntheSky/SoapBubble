@@ -14,7 +14,6 @@ static __constant__ fReal MGlobal;
 static __constant__ fReal reGlobal;
 static __constant__ fReal gGlobal;
 
-// why flip? there is nothing north to the north pole
 __device__ fReal validateCoord(fReal& phi, fReal& theta)
 {
     fReal ret = 1.0f;
@@ -56,38 +55,50 @@ __device__ fReal sampleVPhi(fReal* input, fReal phiRaw, fReal thetaRaw, size_t p
     fReal alphaPhi = normedPhi - static_cast<fReal>(phiIndex);
     fReal alphaTheta = normedTheta - static_cast<fReal>(thetaIndex);
 
-    if ((thetaIndex == 0 && isFlippedPole == -1.0f)
-	|| thetaIndex == nThetaGlobal - 1)
-	{
-	    size_t phiLower = (phiIndex) % nPhiGlobal;
-	    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
-	    fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
-					 input[phiHigher + pitch * thetaIndex], alphaPhi);
+    if (thetaIndex == 0 && isFlippedPole == -1.0f) {
+	size_t phiLower = (phiIndex) % nPhiGlobal;
+	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+	fReal higherBelt = -kaminoLerp(input[phiLower + pitch * thetaIndex],
+				       input[phiHigher + pitch * thetaIndex], alphaPhi);
 
-	    phiLower = (phiIndex + nPhiGlobal / 2) % nPhiGlobal;
-	    phiHigher = (phiLower + 1) % nPhiGlobal;
+	phiLower = (phiIndex + nPhiGlobal / 2) % nPhiGlobal;
+	phiHigher = (phiLower + 1) % nPhiGlobal;
 
-	    fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
-					  input[phiHigher + pitch * thetaIndex], alphaPhi);
+	fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+				     input[phiHigher + pitch * thetaIndex], alphaPhi);
 
-	    fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
-	    return lerped;
-	}
-    else
-	{
-	    size_t phiLower = phiIndex % nPhiGlobal;
-	    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
-	    size_t thetaLower = thetaIndex;
-	    size_t thetaHigher = thetaIndex + 1;
+	fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
+	return lerped;
+    }
+    if (thetaIndex == nThetaGlobal - 1)	{
+	size_t phiLower = (phiIndex) % nPhiGlobal;
+	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+	fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+				     input[phiHigher + pitch * thetaIndex], alphaPhi);
 
-	    fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaLower],
-					 input[phiHigher + pitch * thetaLower], alphaPhi);
-	    fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaHigher],
-					  input[phiHigher + pitch * thetaHigher], alphaPhi);
+	phiLower = (phiIndex + nPhiGlobal / 2) % nPhiGlobal;
+	phiHigher = (phiLower + 1) % nPhiGlobal;
 
-	    fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
-	    return lerped;
-	}
+	fReal higherBelt = -kaminoLerp(input[phiLower + pitch * thetaIndex],
+				      input[phiHigher + pitch * thetaIndex], alphaPhi);
+
+	fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
+	return lerped;
+    }
+  
+    size_t phiLower = phiIndex % nPhiGlobal;
+    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+    size_t thetaLower = thetaIndex;
+    size_t thetaHigher = thetaIndex + 1;
+
+    fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaLower],
+				 input[phiHigher + pitch * thetaLower], alphaPhi);
+    fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaHigher],
+				  input[phiHigher + pitch * thetaHigher], alphaPhi);
+
+    fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
+    return lerped;
+
 }
 
 __device__ fReal sampleVTheta(fReal* input, fReal phiRaw, fReal thetaRaw, size_t pitch)
@@ -106,38 +117,49 @@ __device__ fReal sampleVTheta(fReal* input, fReal phiRaw, fReal thetaRaw, size_t
     fReal alphaPhi = normedPhi - static_cast<fReal>(phiIndex);
     fReal alphaTheta = normedTheta - static_cast<fReal>(thetaIndex);
 
-    if ((thetaIndex == 0 && isFlippedPole == -1.0f) ||
-	thetaIndex == nThetaGlobal - 2)
-	{
-	    size_t phiLower = phiIndex % nPhiGlobal;
-	    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
-	    fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
-					 input[phiHigher + pitch * thetaIndex], alphaPhi);
+    if (thetaIndex == 0 && isFlippedPole == -1.0f) {
+	size_t phiLower = phiIndex % nPhiGlobal;
+	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+	fReal higherBelt = -kaminoLerp(input[phiLower + pitch * thetaIndex],
+				       input[phiHigher + pitch * thetaIndex], alphaPhi);
 
-	    phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
-	    phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
-	    fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
-					  input[phiHigher + pitch * thetaIndex], alphaPhi);
+	phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
+	phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
+	fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+				     input[phiHigher + pitch * thetaIndex], alphaPhi);
 
-	    alphaTheta = 0.5 * alphaTheta;
-	    fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
-	    return lerped;
-	}
-    else
-	{
-	    size_t phiLower = phiIndex % nPhiGlobal;
-	    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
-	    size_t thetaLower = thetaIndex;
-	    size_t thetaHigher = thetaIndex + 1;
+	alphaTheta = 0.5 * alphaTheta;
+	fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
+	return lerped;
+    }
+    if (thetaIndex == nThetaGlobal - 2) {
+	size_t phiLower = phiIndex % nPhiGlobal;
+	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+	fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+				     input[phiHigher + pitch * thetaIndex], alphaPhi);
 
-	    fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaLower],
-					 input[phiHigher + pitch * thetaLower], alphaPhi);
-	    fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaHigher],
-					  input[phiHigher + pitch * thetaHigher], alphaPhi);
+	phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
+	phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
+	fReal higherBelt = -kaminoLerp(input[phiLower + pitch * thetaIndex],
+				       input[phiHigher + pitch * thetaIndex], alphaPhi);
 
-	    fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
-	    return lerped;
-	}
+	alphaTheta = 0.5 * alphaTheta;
+	fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
+	return lerped;
+    }
+    
+    size_t phiLower = phiIndex % nPhiGlobal;
+    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+    size_t thetaLower = thetaIndex;
+    size_t thetaHigher = thetaIndex + 1;
+
+    fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaLower],
+				 input[phiHigher + pitch * thetaLower], alphaPhi);
+    fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaHigher],
+				  input[phiHigher + pitch * thetaHigher], alphaPhi);
+
+    fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
+    return lerped;
 }
 
 __device__ fReal sampleCentered(fReal* input, fReal phiRaw, fReal thetaRaw, size_t pitch)
@@ -155,10 +177,22 @@ __device__ fReal sampleCentered(fReal* input, fReal phiRaw, fReal thetaRaw, size
     int thetaIndex = static_cast<int>(floorf(normedTheta));
     fReal alphaPhi = normedPhi - static_cast<fReal>(phiIndex);
     fReal alphaTheta = normedTheta - static_cast<fReal>(thetaIndex);
+    
+    if (thetaIndex == 0 && isFlippedPole == -1.0f) {
+	    size_t phiLower = phiIndex % nPhiGlobal;
+	    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+	    fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+					 input[phiHigher + pitch * thetaIndex], alphaPhi);
 
-    if ((thetaIndex == 0 && isFlippedPole == -1.0f) ||
-	thetaIndex == nThetaGlobal - 1)
-	{
+	    phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
+	    phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
+	    fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+					  input[phiHigher + pitch * thetaIndex], alphaPhi);
+
+	    fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
+	    return lerped;
+	}
+    if (thetaIndex == nThetaGlobal - 1) {
 	    size_t phiLower = phiIndex % nPhiGlobal;
 	    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
 	    fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
@@ -169,25 +203,21 @@ __device__ fReal sampleCentered(fReal* input, fReal phiRaw, fReal thetaRaw, size
 	    fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
 					  input[phiHigher + pitch * thetaIndex], alphaPhi);
 
-	    alphaTheta = 0.5 * alphaTheta;
 	    fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
 	    return lerped;
-	}
-    else
-	{
-	    size_t phiLower = phiIndex % nPhiGlobal;
-	    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
-	    size_t thetaLower = thetaIndex;
-	    size_t thetaHigher = thetaIndex + 1;
+    }
+    size_t phiLower = phiIndex % nPhiGlobal;
+    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+    size_t thetaLower = thetaIndex;
+    size_t thetaHigher = thetaIndex + 1;
 
-	    fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaLower],
-					 input[phiHigher + pitch * thetaLower], alphaPhi);
-	    fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaHigher],
-					  input[phiHigher + pitch * thetaHigher], alphaPhi);
+    fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaLower],
+				 input[phiHigher + pitch * thetaLower], alphaPhi);
+    fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaHigher],
+				  input[phiHigher + pitch * thetaHigher], alphaPhi);
 
-	    fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
-	    return lerped;
-	}
+    fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
+    return lerped;
 }
 
 __global__ void advectionVPhiKernel
@@ -227,9 +257,9 @@ __global__ void advectionVPhiKernel
     }
     fReal guTheta = 0.0;
     if (thetaId == 0) {	
-	guTheta = 0.125 * (v0 + v1) + 0.375 * (v2 + v3);
+	guTheta = -0.125 * (v0 + v1) + 0.375 * (v2 + v3);
      } else if (thetaId == nThetaGlobal - 1) {
-	guTheta = 0.375 * (v0 + v1) + 0.125 * (v2 + v3);
+	guTheta = 0.375 * (v0 + v1) - 0.125 * (v2 + v3);
     } else {
      	guTheta = 0.25 * (v0 + v1 + v2 + v3);
     }
@@ -245,6 +275,7 @@ __global__ void advectionVPhiKernel
     // Traced halfway in phi-theta space
     fReal midPhi = gPhi - 0.5 * deltaPhi;
     fReal midTheta = gTheta - 0.5 * deltaTheta;
+
     fReal muPhi = sampleVPhi(velPhi, midPhi, midTheta, pitch);
     fReal muTheta = sampleVTheta(velTheta, midPhi, midTheta, pitch);
 
