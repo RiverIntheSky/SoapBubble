@@ -119,7 +119,7 @@ KaminoSolver::~KaminoSolver()
     std::cout << "Total time used for body force : " << this->bodyforceTime << std::endl;
     std::cout << "Percentage of advection : " << advectionTime / totalTimeUsed * 100.0f << "%" << std::endl;
     std::cout << "Percentage of bodyforce : " << bodyforceTime / totalTimeUsed * 100.0f << "%" << std::endl;
-    # endif
+# endif
 }
 
 void KaminoSolver::copyVelocity2GPU()

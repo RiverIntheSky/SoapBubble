@@ -14,22 +14,19 @@ static __constant__ fReal MGlobal;
 static __constant__ fReal reGlobal;
 static __constant__ fReal gGlobal;
 
-__device__ fReal validateCoord(fReal& phi, fReal& theta)
-{
-    fReal ret = 1.0f;
+__device__ bool validateCoord(fReal& phi, fReal& theta) {
+    bool ret = false;
     theta = theta - static_cast<int>(floorf(theta / M_2PI)) * M_2PI;
-    if (theta > M_PI)
-	{
-	    theta = M_2PI - theta;
-	    phi += M_PI;
-	    ret = -ret;
-	}
-    if (theta < 0)
-	{
-	    theta = -theta;
-	    phi += M_PI;
-	    ret = -ret;
-	}
+    if (theta > M_PI) {
+	theta = M_2PI - theta;
+	phi += M_PI;
+	ret = !ret;
+    }
+    if (theta < 0) {
+	theta = -theta;
+	phi += M_PI;
+	ret = !ret;
+    }
     phi = phi - static_cast<int>(floorf(phi / M_2PI)) * M_2PI;
     return ret;
 }
@@ -46,7 +43,7 @@ __device__ fReal sampleVPhi(fReal* input, fReal phiRaw, fReal thetaRaw, size_t p
     // Phi and Theta are now shifted back to origin
 
     fReal invGridLen = 1.0 / gridLenGlobal;
-    fReal isFlippedPole = validateCoord(phi, theta);
+    bool isFlippedPole = validateCoord(phi, theta);
     fReal normedPhi = phi * invGridLen;
     fReal normedTheta = theta * invGridLen;
 
@@ -55,7 +52,7 @@ __device__ fReal sampleVPhi(fReal* input, fReal phiRaw, fReal thetaRaw, size_t p
     fReal alphaPhi = normedPhi - static_cast<fReal>(phiIndex);
     fReal alphaTheta = normedTheta - static_cast<fReal>(thetaIndex);
 
-    if (thetaIndex == 0 && isFlippedPole == -1.0f) {
+    if (thetaIndex == 0 && isFlippedPole) {
 	size_t phiLower = (phiIndex) % nPhiGlobal;
 	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
 	fReal higherBelt = -kaminoLerp(input[phiLower + pitch * thetaIndex],
@@ -108,7 +105,7 @@ __device__ fReal sampleVTheta(fReal* input, fReal phiRaw, fReal thetaRaw, size_t
     // Phi and Theta are now shifted back to origin
 
     fReal invGridLen = 1.0 / gridLenGlobal;
-    fReal isFlippedPole = validateCoord(phi, theta);
+    bool isFlippedPole = validateCoord(phi, theta);
     fReal normedPhi = phi * invGridLen;
     fReal normedTheta = theta * invGridLen;
 
@@ -117,7 +114,7 @@ __device__ fReal sampleVTheta(fReal* input, fReal phiRaw, fReal thetaRaw, size_t
     fReal alphaPhi = normedPhi - static_cast<fReal>(phiIndex);
     fReal alphaTheta = normedTheta - static_cast<fReal>(thetaIndex);
 
-    if (thetaIndex == 0 && isFlippedPole == -1.0f) {
+    if (thetaIndex == 0 && isFlippedPole) {
 	size_t phiLower = phiIndex % nPhiGlobal;
 	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
 	fReal higherBelt = -kaminoLerp(input[phiLower + pitch * thetaIndex],
@@ -169,7 +166,7 @@ __device__ fReal sampleCentered(fReal* input, fReal phiRaw, fReal thetaRaw, size
     // Phi and Theta are now shifted back to origin
 
     fReal invGridLen = 1.0 / gridLenGlobal;
-    fReal isFlippedPole = validateCoord(phi, theta);
+    bool isFlippedPole = validateCoord(phi, theta);
     fReal normedPhi = phi * invGridLen;
     fReal normedTheta = theta * invGridLen;
 
@@ -178,7 +175,7 @@ __device__ fReal sampleCentered(fReal* input, fReal phiRaw, fReal thetaRaw, size
     fReal alphaPhi = normedPhi - static_cast<fReal>(phiIndex);
     fReal alphaTheta = normedTheta - static_cast<fReal>(thetaIndex);
     
-    if (thetaIndex == 0 && isFlippedPole == -1.0f) {
+    if (thetaIndex == 0 && isFlippedPole) {
 	    size_t phiLower = phiIndex % nPhiGlobal;
 	    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
 	    fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
