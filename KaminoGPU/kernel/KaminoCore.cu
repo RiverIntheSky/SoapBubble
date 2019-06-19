@@ -77,7 +77,7 @@ __device__ fReal sampleVPhi(fReal* input, fReal phiRaw, fReal thetaRaw, size_t p
 	phiHigher = (phiLower + 1) % nPhiGlobal;
 
 	fReal higherBelt = -kaminoLerp(input[phiLower + pitch * thetaIndex],
-				      input[phiHigher + pitch * thetaIndex], alphaPhi);
+				       input[phiHigher + pitch * thetaIndex], alphaPhi);
 
 	fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
 	return lerped;
@@ -176,32 +176,32 @@ __device__ fReal sampleCentered(fReal* input, fReal phiRaw, fReal thetaRaw, size
     fReal alphaTheta = normedTheta - static_cast<fReal>(thetaIndex);
     
     if (thetaIndex == 0 && isFlippedPole) {
-	    size_t phiLower = phiIndex % nPhiGlobal;
-	    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
-	    fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
-					 input[phiHigher + pitch * thetaIndex], alphaPhi);
+	size_t phiLower = phiIndex % nPhiGlobal;
+	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+	fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+				      input[phiHigher + pitch * thetaIndex], alphaPhi);
 
-	    phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
-	    phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
-	    fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
-					  input[phiHigher + pitch * thetaIndex], alphaPhi);
+	phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
+	phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
+	fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+				     input[phiHigher + pitch * thetaIndex], alphaPhi);
 
-	    fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
-	    return lerped;
-	}
+	fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
+	return lerped;
+    }
     if (thetaIndex == nThetaGlobal - 1) {
-	    size_t phiLower = phiIndex % nPhiGlobal;
-	    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
-	    fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
-					 input[phiHigher + pitch * thetaIndex], alphaPhi);
+	size_t phiLower = phiIndex % nPhiGlobal;
+	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+	fReal lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+				     input[phiHigher + pitch * thetaIndex], alphaPhi);
 
-	    phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
-	    phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
-	    fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
-					  input[phiHigher + pitch * thetaIndex], alphaPhi);
+	phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
+	phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
+	fReal higherBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+				      input[phiHigher + pitch * thetaIndex], alphaPhi);
 
-	    fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
-	    return lerped;
+	fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
+	return lerped;
     }
     size_t phiLower = phiIndex % nPhiGlobal;
     size_t phiHigher = (phiLower + 1) % nPhiGlobal;
@@ -255,7 +255,7 @@ __global__ void advectionVPhiKernel
     fReal guTheta = 0.0;
     if (thetaId == 0) {	
     	guTheta = -0.125 * (v0 + v1) + 0.375 * (v2 + v3);
-     } else if (thetaId == nThetaGlobal - 1) {
+    } else if (thetaId == nThetaGlobal - 1) {
     	guTheta = 0.375 * (v0 + v1) - 0.125 * (v2 + v3);
     } else {
      	guTheta = 0.25 * (v0 + v1 + v2 + v3);
@@ -404,18 +404,18 @@ __global__ void advectionAllCentered
     // fReal guPhi = sampleVPhi(velPhi, gPhi, gTheta, nPitchInElements);
     // fReal guTheta = sampleVTheta(velTheta, gPhi, gTheta, nPitchInElements);
     fReal guPhi = 0.5 * (velPhi[thetaId * nPitchInElements + phiId] +
-			 velPhi[thetaId * nPitchInElements + (phiId + 1) % nPhiGlobal]);
+    			 velPhi[thetaId * nPitchInElements + (phiId + 1) % nPhiGlobal]);
     fReal guTheta;
     if (thetaId == 0) {
-	guTheta = 0.75 * velTheta[phiId] -
-	    0.25 * velTheta[(phiId + nPhiGlobal / 2) % nPhiGlobal];
+    	guTheta = 0.75 * velTheta[phiId] -
+    	    0.25 * velTheta[(phiId + nPhiGlobal / 2) % nPhiGlobal];
     } else if (thetaId == nThetaGlobal - 1) {
-	int thetaIdNorth = thetaId - 1;
-	guTheta = 0.75 * velTheta[thetaIdNorth * nPitchInElements + phiId] -
-	    0.25 * velTheta[thetaIdNorth * nPitchInElements + (phiId + nPhiGlobal / 2) % nPhiGlobal];
+    	int thetaIdNorth = thetaId - 1;
+    	guTheta = 0.75 * velTheta[thetaIdNorth * nPitchInElements + phiId] -
+    	    0.25 * velTheta[thetaIdNorth * nPitchInElements + (phiId + nPhiGlobal / 2) % nPhiGlobal];
     } else {
-	guTheta = 0.5 * (velTheta[(thetaId - 1) * nPitchInElements + phiId] +
-			 velTheta[thetaId * nPitchInElements + phiId]);
+    	guTheta = 0.5 * (velTheta[(thetaId - 1) * nPitchInElements + phiId] +
+    			 velTheta[thetaId * nPitchInElements + phiId]);
     }
 
     fReal cofTheta = timeStepGlobal * invRadiusGlobal;
@@ -805,7 +805,7 @@ __global__ void applyforcevelthetaKernel
     // values at vTheta grid
     fReal div = 0.5 * (divNorth + divSouth);
     fReal Delta = 0.5 * (thickness[thetaId * pitch + phiId] +
-		       thickness[(thetaId + 1) * pitch + phiId]);
+			 thickness[(thetaId + 1) * pitch + phiId]);
     fReal invDelta = 1. / Delta;
     fReal uPhi = 0.25 * (u0 + u1 + u2 + u3);
 
@@ -1435,7 +1435,7 @@ void Kamino::run()
     checkCudaErrors(cudaMemcpyToSymbol(gGlobal, &(this->g), sizeof(fReal)));
 
 # ifdef WRITE_THICKNESS_DATA
-   solver.write_thickness_img(thicknessPath, 0);
+    solver.write_thickness_img(thicknessPath, 0);
 # endif  
 # ifdef WRITE_VELOCITY_DATA
     solver.write_data_bgeo(gridPath, 0);
@@ -1457,6 +1457,11 @@ void Kamino::run()
 		    solver.stepForward(dt);
 		    T += dt/this->U;
 		}
+	    if (solver.isBroken()) {
+		std::cerr << "Film is broken." << std::endl;
+		break;
+	    }
+		
 	    solver.stepForward(dt/this->U + i*DT - T);
 	    T = i*DT;
 
@@ -1464,12 +1469,6 @@ void Kamino::run()
 # ifdef WRITE_THICKNESS_DATA
 	    solver.write_thickness_img(thicknessPath, i);
 # endif	   
-# ifdef WRITE_VELOCITY_DATA
-	    solver.write_data_bgeo(gridPath, i);
-# endif
-# ifdef WRITE_PARTICLES
-	    solver.write_particles_bgeo(particlePath, i);
-# endif
 	}
 
 # ifdef PERFORMANCE_BENCHMARK
