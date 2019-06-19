@@ -230,7 +230,7 @@ __global__ void advectionVPhiKernel
     fReal gTheta = ((fReal)thetaId + vPhiThetaOffset) * gridLenGlobal;
 	
     // Sample the speed
-    //fReal guTheta = sampleVTheta(velTheta, gPhi, gTheta, pitch);
+    // fReal guTheta = sampleVTheta(velTheta, gPhi, gTheta, pitch);
     // fReal guPhi = sampleVPhi(velPhi, gPhi, gTheta, pitch);
     int thetaNorthId = thetaId - 1;
     int phiWestId = (phiId - 1 + nPhiGlobal) % nPhiGlobal;
@@ -254,17 +254,17 @@ __global__ void advectionVPhiKernel
     }
     fReal guTheta = 0.0;
     if (thetaId == 0) {	
-	guTheta = -0.125 * (v0 + v1) + 0.375 * (v2 + v3);
+    	guTheta = -0.125 * (v0 + v1) + 0.375 * (v2 + v3);
      } else if (thetaId == nThetaGlobal - 1) {
-	guTheta = 0.375 * (v0 + v1) - 0.125 * (v2 + v3);
+    	guTheta = 0.375 * (v0 + v1) - 0.125 * (v2 + v3);
     } else {
      	guTheta = 0.25 * (v0 + v1 + v2 + v3);
     }
     fReal guPhi = velPhi[thetaId * pitch + phiId];
        
-    fReal cofPhi = timeStepGlobal * invRadiusGlobal / sinf(gTheta);
     fReal cofTheta = timeStepGlobal * invRadiusGlobal;
-
+    fReal cofPhi = cofTheta / sinf(gTheta);
+    
     fReal deltaPhi = guPhi * cofPhi;
     fReal deltaTheta = guTheta * cofTheta;
 
@@ -315,9 +315,9 @@ __global__ void advectionVThetaKernel
     fReal guPhi = 0.25 * (u0 + u1 + u2 + u3);
     fReal guTheta = velTheta[thetaId * pitch + phiId];
     
-    fReal cofPhi = timeStepGlobal * invRadiusGlobal / sinf(gTheta);
     fReal cofTheta = timeStepGlobal * invRadiusGlobal;
-
+    fReal cofPhi = cofTheta / sinf(gTheta);
+    
     fReal deltaPhi = guPhi * cofPhi;
     fReal deltaTheta = guTheta * cofTheta;
 
@@ -401,12 +401,25 @@ __global__ void advectionAllCentered
     fReal gTheta = ((fReal)thetaId + centeredThetaOffset) * gridLenGlobal;
 
     // Sample the speed
-    fReal guPhi = sampleVPhi(velPhi, gPhi, gTheta, nPitchInElements);
-    fReal guTheta = sampleVTheta(velTheta, gPhi, gTheta, nPitchInElements);
+    // fReal guPhi = sampleVPhi(velPhi, gPhi, gTheta, nPitchInElements);
+    // fReal guTheta = sampleVTheta(velTheta, gPhi, gTheta, nPitchInElements);
+    fReal guPhi = 0.5 * (velPhi[thetaId * nPitchInElements + phiId] +
+			 velPhi[thetaId * nPitchInElements + (phiId + 1) % nPhiGlobal]);
+    fReal guTheta;
+    if (thetaId == 0) {
+	guTheta = 0.75 * velTheta[phiId] -
+	    0.25 * velTheta[(phiId + nPhiGlobal / 2) % nPhiGlobal];
+    } else if (thetaId == nThetaGlobal - 1) {
+	int thetaIdNorth = thetaId - 1;
+	guTheta = 0.75 * velTheta[thetaIdNorth * nPitchInElements + phiId] -
+	    0.25 * velTheta[thetaIdNorth * nPitchInElements + (phiId + nPhiGlobal / 2) % nPhiGlobal];
+    } else {
+	guTheta = 0.5 * (velTheta[(thetaId - 1) * nPitchInElements + phiId] +
+			 velTheta[thetaId * nPitchInElements + phiId]);
+    }
 
-    fReal latRadius = radiusGlobal * sinf(gTheta);
-    fReal cofPhi = timeStepGlobal / latRadius;
-    fReal cofTheta = timeStepGlobal / radiusGlobal;
+    fReal cofTheta = timeStepGlobal * invRadiusGlobal;
+    fReal cofPhi = cofTheta / sinf(gTheta);
 
     fReal deltaPhi = guPhi * cofPhi;
     fReal deltaTheta = guTheta * cofTheta;
@@ -1057,7 +1070,6 @@ __global__ void applyforceThickness
     int thetaId = blockIdx.x / splitVal;
 
     fReal f = -div[thetaId * nPhiGlobal + phiId];
-    // TODO: before or after advection??? Or implicit???
     thicknessOutput[thetaId * nPhiGlobal + phiId] = f * timeStepGlobal * thicknessInput[thetaId * nPhiGlobal + phiId] 
 	+ thicknessInput[thetaId * nPhiGlobal + phiId];
 }
@@ -1438,7 +1450,7 @@ void Kamino::run()
 # endif
 
     float T = 0.0;              // simulation time
-    for (int i = 1; i <= frames; i++)
+    for (int i = 1; i < frames; i++)
 	{
 	    while (T < i*DT && !solver.isBroken())
 		{
