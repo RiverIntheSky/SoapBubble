@@ -233,7 +233,7 @@ fReal KaminoSolver::maxAbsDifference(const fReal* A, const fReal* B, const size_
     return res;
 }
 
-void KaminoSolver::adjustStepSize(fReal& dt, const fReal& eps) {
+void KaminoSolver::adjustStepSize(fReal& dt, const fReal& epsilon) {
     copyVelocityBack2CPU();
     thickness->copyBackToCPU();
     surfConcentration->copyBackToCPU();
@@ -291,7 +291,7 @@ void KaminoSolver::adjustStepSize(fReal& dt, const fReal& eps) {
 						    maxAbsDifference(gammaSmall, gammaLarge, sizePhiAndCentered))));
 
 	// optimal step size
-	optTimeStep = dt * std::sqrt(eps*(m*m-1)/maxError);
+	optTimeStep = dt * std::sqrt(epsilon*(m*m-1)/maxError);
 
 	if ((optTimeStep > 2 * dt || dt > 2 * optTimeStep) && loop < 1) {
 	    loop++;

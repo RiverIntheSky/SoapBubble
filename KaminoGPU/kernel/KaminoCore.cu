@@ -13,6 +13,7 @@ static __constant__ fReal SGlobal;
 static __constant__ fReal MGlobal;
 static __constant__ fReal reGlobal;
 static __constant__ fReal gGlobal;
+static __constant__ fReal DsGlobal;
 
 __device__ bool validateCoord(fReal& phi, fReal& theta) {
     bool ret = false;
@@ -1088,7 +1089,8 @@ __global__ void applyforceThickness
 }
 
 __global__ void applyforceSurfConcentration
-(fReal* sConcentrationOutput, fReal* sConcentrationInput, fReal* div, size_t nPitchInElements)
+(fReal* sConcentrationOutput, fReal* sConcentrationInput, fReal* uPhi, fReal* vTheta,
+ fReal* div, size_t pitch)
 {
     // Index
     int splitVal = nPhiGlobal / blockDim.x;
@@ -1096,10 +1098,21 @@ __global__ void applyforceSurfConcentration
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
 
+    fReal gTheta = ((fReal)thetaId + centeredThetaOffset) * gridLenGlobal;
+    fReal gPhi = ((fReal)phiId + centeredPhiOffset) * gridLenGlobal;
+	
+    fReal gamma = sConcentrationInput[thetaId * pitch + phiId];
+    fReal gammaWest = sConcentrationInput[thetaId * pitch + (phiId - 1 + nPhiGlobal) % nPhiGlobal];
+    fReal gammaEast = sConcentrationInput[thetaId * pitch + (phiId + 1) % nPhiGlobal];
+    fReal gammaNorth = sampleCentered(sConcentrationInput, gPhi, gTheta - gridLenGlobal, pitch);
+    fReal gammaSouth = sampleCentered(sConcentrationInput, gPhi, gTheta + gridLenGlobal, pitch);
+    fReal laplace = invGridLenGlobal * invGridLenGlobal *
+	(gammaWest - 4*gamma + gammaEast + gammaNorth + gammaSouth);
+    
     // TODO: add diffusivity
-    fReal f = -div[thetaId * nPhiGlobal + phiId];
-    sConcentrationOutput[thetaId * nPhiGlobal + phiId] = f * timeStepGlobal * sConcentrationInput[thetaId * nPhiGlobal + phiId]
-	+ sConcentrationInput[thetaId * nPhiGlobal + phiId];
+    fReal f1 = -div[thetaId * nPhiGlobal + phiId] * gamma;
+    fReal f2 = DsGlobal * laplace;
+    sConcentrationOutput[thetaId * pitch + phiId] = (f1 + f2) * timeStepGlobal + gamma;
 }
 
 void KaminoSolver::bodyforce()
@@ -1121,7 +1134,9 @@ void KaminoSolver::bodyforce()
 
     determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
     applyforceSurfConcentration<<<gridLayout, blockLayout>>>
-    	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(), div, surfConcentration->getNextStepPitchInElements());
+    	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
+	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), div,
+	 surfConcentration->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
@@ -1446,6 +1461,7 @@ void Kamino::run()
     checkCudaErrors(cudaMemcpyToSymbol(MGlobal, &(this->M), sizeof(fReal)));
     checkCudaErrors(cudaMemcpyToSymbol(reGlobal, &(this->re), sizeof(fReal)));
     checkCudaErrors(cudaMemcpyToSymbol(gGlobal, &(this->g), sizeof(fReal)));
+    checkCudaErrors(cudaMemcpyToSymbol(DsGlobal, &(this->Ds), sizeof(fReal)));
 
 # ifdef WRITE_THICKNESS_DATA
     solver.write_thickness_img(thicknessPath, 0);
