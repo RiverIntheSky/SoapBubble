@@ -117,6 +117,9 @@ public:
     void initThicknessfromPic(std::string path);
     void initParticlesfromPic(std::string path, size_t parPergrid);
 
+    void copyToCPU(KaminoQuantity* quantity, fReal* cpubuffer);
+    fReal maxAbsDifference(const fReal* A, const fReal* B, const size_t& size);
+    void adjustStepSize(fReal& timeStep, const fReal& eps);
     void stepForward(fReal timeStep);
     bool isBroken();
     void setBroken(bool broken);

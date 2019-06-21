@@ -6,9 +6,11 @@
 // CONSTRUCTOR / DESTRUCTOR >>>>>>>>>>
 
 const int fftRank = 1;
+const int m = 3;
 static __constant__ size_t nPhiGlobal;
 static __constant__ size_t nThetaGlobal;
 static __constant__ fReal gridLenGlobal;
+
 
 KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
 			   fReal A, int B, int C, int D, int E, fReal H) :
@@ -211,6 +213,103 @@ void KaminoSolver::precomputeABCCoef()
 	(this->gpuA, this->gpuB, this->gpuC);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
+}
+
+void KaminoSolver::copyToCPU(KaminoQuantity* quantity, fReal* cpubuffer) {
+    checkCudaErrors(cudaMemcpy2D((void*)cpubuffer, quantity->getNPhi() * sizeof(fReal),
+				 (void*)quantity->getGPUThisStep(),
+				 quantity->getThisStepPitchInElements() * sizeof(fReal),
+				 quantity->getNPhi() * sizeof(fReal), quantity->getNTheta(),
+				 cudaMemcpyDeviceToHost));
+}
+
+fReal KaminoSolver::maxAbsDifference(const fReal* A, const fReal* B, const size_t& size) {
+    fReal res = 0.f;
+    for (int i = 0; i < size; i++) {
+	fReal diff = std::abs(A[i] - B[i]);
+	if (diff > res)
+	    res = diff;
+    }
+    return res;
+}
+
+void KaminoSolver::adjustStepSize(fReal& dt, const fReal& eps) {
+    copyVelocityBack2CPU();
+    thickness->copyBackToCPU();
+    surfConcentration->copyBackToCPU();
+
+    size_t sizePhiAndCentered = velPhi->getNPhi() * velPhi->getNTheta();
+    size_t sizeTheta = velTheta->getNPhi() * velTheta->getNTheta();
+    
+    fReal* uSmall = new fReal[sizePhiAndCentered];
+    fReal* vSmall = new fReal[sizeTheta];
+    fReal* deltaSmall = new fReal[sizePhiAndCentered];
+    fReal* gammaSmall = new fReal[sizePhiAndCentered];
+
+    fReal* uLarge = new fReal[sizePhiAndCentered];
+    fReal* vLarge = new fReal[sizeTheta];
+    fReal* deltaLarge = new fReal[sizePhiAndCentered];
+    fReal* gammaLarge = new fReal[sizePhiAndCentered];
+
+    fReal optTimeStep = dt;
+    int loop = 0;
+    while (true) {
+
+	// m small steps
+	for (int i = 0; i < m; i++) {
+	    stepForward(dt);
+	}
+
+	// store results in cpu;
+	copyToCPU(velPhi, uSmall);
+	copyToCPU(velTheta, vSmall);
+	copyToCPU(thickness, deltaSmall);
+	copyToCPU(surfConcentration, gammaSmall);
+    
+	// reload values before the small steps
+	copyVelocity2GPU();
+	thickness->copyToGPU();
+	surfConcentration->copyToGPU();
+
+	// a large step
+	stepForward(dt * m);
+
+	// store results in cpu;
+	copyToCPU(velPhi, uLarge);
+	copyToCPU(velTheta, vLarge);
+	copyToCPU(thickness, deltaLarge);
+	copyToCPU(surfConcentration, gammaLarge);
+    
+	// reload values before the large step
+	copyVelocity2GPU();
+	thickness->copyToGPU();
+	surfConcentration->copyToGPU();
+
+	fReal maxError = std::max(maxAbsDifference(uSmall, uLarge, sizePhiAndCentered),
+				  std::max(maxAbsDifference(vSmall, vLarge, sizeTheta),
+					   std::max(maxAbsDifference(deltaSmall, deltaLarge, sizePhiAndCentered),
+						    maxAbsDifference(gammaSmall, gammaLarge, sizePhiAndCentered))));
+
+	// optimal step size
+	optTimeStep = dt * std::sqrt(eps*(m*m-1)/maxError);
+
+	if ((optTimeStep > 2 * dt || dt > 2 * optTimeStep) && loop < 1) {
+	    loop++;
+	    dt = sqrt(dt * optTimeStep);	
+	} else {
+	    dt = optTimeStep;
+	    break;
+	}
+    }
+    
+    delete[] uSmall;
+    delete[] vSmall;
+    delete[] deltaSmall;
+    delete[] gammaSmall;
+    delete[] uLarge;
+    delete[] vLarge;
+    delete[] deltaLarge;
+    delete[] gammaLarge;
 }
 
 void KaminoSolver::stepForward(fReal timeStep)

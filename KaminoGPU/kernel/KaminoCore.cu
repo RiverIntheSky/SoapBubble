@@ -1465,6 +1465,10 @@ void Kamino::run()
     float T = 0.0;              // simulation time
     for (int i = 1; i < frames; i++)
 	{
+	    solver.adjustStepSize(dt, epsilon);
+	    checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &dt, sizeof(fReal)));
+	    std::cout << "current time step size is " << dt << " s" << std::endl;
+	    std::cout << "steps needed until next frame " << DT/dt*U << std::endl;
 	    while (T < i*DT && !solver.isBroken())
 		{
 		    solver.stepForward(dt);
