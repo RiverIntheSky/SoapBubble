@@ -722,10 +722,10 @@ __global__ void comDivergenceKernel
 {
     int splitVal = nPhiGlobal / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
-    int gridPhiId = threadIdx.x + threadSequence * blockDim.x;
-    int gridThetaId = blockIdx.x / splitVal;
- 
-    fReal gridThetaCoord = ((fReal)gridThetaId + centeredThetaOffset) * gridLenGlobal;
+    int phiId = threadIdx.x + threadSequence * blockDim.x;
+    int thetaId = blockIdx.x / splitVal;
+
+    fReal thetaCoord = ((fReal)thetaId + centeredThetaOffset) * gridLenGlobal;
 
     fReal uEast = 0.0;
     fReal uWest = 0.0;
@@ -734,36 +734,42 @@ __global__ void comDivergenceKernel
 
     fReal halfStep = 0.5 * gridLenGlobal;
 
-    fReal thetaSouth = gridThetaCoord + halfStep;
-    fReal thetaNorth = gridThetaCoord - halfStep;
+    fReal thetaSouth = thetaCoord + halfStep;
+    fReal thetaNorth = thetaCoord - halfStep;
 
-    int phiIdWest = gridPhiId;
+    int phiIdWest = phiId;
     int phiIdEast = (phiIdWest + 1) % nPhiGlobal;
 
-    uWest = velPhi[gridThetaId * velPhiPitchInElements + phiIdWest];
-    uEast = velPhi[gridThetaId * velPhiPitchInElements + phiIdEast];
+    uWest = velPhi[thetaId * velPhiPitchInElements + phiIdWest];
+    uEast = velPhi[thetaId * velPhiPitchInElements + phiIdEast];
 
-    if (gridThetaId != 0)
-	{
-	    int thetaNorthIdx = gridThetaId - 1;
-	    vNorth = velTheta[thetaNorthIdx * velThetaPitchInElements + gridPhiId];
-	}
-    if (gridThetaId != nThetaGlobal - 1)
-	{
-	    int thetaSouthIdx = gridThetaId;
-	    vSouth = velTheta[thetaSouthIdx * velThetaPitchInElements + gridPhiId];
-	}
+    if (thetaId != 0) {
+	size_t thetaNorthIdx = thetaId - 1;
+	vNorth = velTheta[thetaNorthIdx * velThetaPitchInElements + phiId];
+    } else {
+	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
+	vNorth = 0.5 * (velTheta[thetaId * velThetaPitchInElements + phiId] -
+			velTheta[thetaId * velThetaPitchInElements + oppositePhiId]);
+    }
+    if (thetaId != nThetaGlobal - 1) {
+	size_t thetaSouthIdx = thetaId;
+	vSouth = velTheta[thetaSouthIdx * velThetaPitchInElements + phiId];
+    } else {
+	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
+	vSouth = 0.5 * (velTheta[thetaId * velThetaPitchInElements + phiId] -
+			velTheta[thetaId * velThetaPitchInElements + oppositePhiId]);
+    }
 
-    fReal invGridSine = 1.0 / sinf(gridThetaCoord);
+    fReal invGridSine = 1.0 / sinf(thetaCoord);
     fReal sinNorth = sinf(thetaNorth);
     fReal sinSouth = sinf(thetaSouth);
-    fReal factor = invGridSine * invRadiusGlobal / gridLenGlobal;
+    fReal factor = invGridSine * invRadiusGlobal * invGridLenGlobal;
     fReal termTheta = factor * (vSouth * sinSouth - vNorth * sinNorth);
     fReal termPhi = factor * (uEast - uWest);
 
     fReal f = termTheta + termPhi;
 
-    div[gridThetaId * nPhiGlobal + gridPhiId] = f;
+    div[thetaId * nPhiGlobal + phiId] = f;
 }
 
 __global__ void applyforcevelthetaKernel
@@ -824,13 +830,22 @@ __global__ void applyforcevelthetaKernel
     fReal v3 = velThetaInput[thetaId * pitch + phiWestId];
     fReal v4 = velThetaInput[thetaId * pitch + phiEastId];
     if (thetaId != 0) {
-	int thetaNorthId = thetaId - 1;
+	size_t thetaNorthId = thetaId - 1;
 	v0 = velThetaInput[thetaNorthId * pitch + phiId];
+    } else {
+	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
+	v0 = 0.5 * (velThetaInput[thetaId * pitch + phiId] -
+		    velThetaInput[thetaId * pitch + oppositePhiId]);
     }
     if (thetaId != nThetaGlobal - 2) {
-	int thetaSouthId = thetaId + 1;
+	size_t thetaSouthId = thetaId + 1;
 	v2 = velThetaInput[thetaSouthId * pitch + phiId];
-    }   
+    } else {
+	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
+	v2 = 0.5 * (velThetaInput[thetaId * pitch + phiId] -
+			velThetaInput[thetaId * pitch + oppositePhiId]);
+    }
+
     fReal pvpy = 0.5 * invGridLenGlobal * (v2 - v0);
     fReal pvpyNorth = invGridLenGlobal * (v1 - v0);
     fReal pvpySouth = invGridLenGlobal * (v2 - v1);
@@ -916,12 +931,11 @@ __global__ void applyforcevelphiKernel
     fReal GammaWest = concentration[thetaId * pitch + phiWestId];
     fReal GammaEast = concentration[thetaId * pitch + phiId];
     
-    // -  +  v  +  -
-    // |  d0 u3 d2
-    // +  v0 +  v1 +  v
-    // u0    u1    u2  d
-    // +  v2 +  v3 +  -
-    // |  d1 u4 d3
+    // |  d0 u3 d2 |
+    // +  v0 +  v1 +
+    // u0    u1    u2
+    // +  v2 +  v3 + 
+    // |  d1 u4 d3 |
     //
     // u1 is the current velPhi
     fReal v0 = 0.0;
@@ -931,10 +945,20 @@ __global__ void applyforcevelphiKernel
     if (thetaId != 0) {
 	v0 = velTheta[thetaNorthId * pitch + phiWestId];
 	v1 = velTheta[thetaNorthId * pitch + phiId];
+    } else {
+	v0 = 0.5 * (velTheta[thetaId * pitch + phiWestId] -
+		    velTheta[thetaId * pitch + (phiWestId + nPhiGlobal / 2) % nPhiGlobal]);
+	v1 = 0.5 * (velTheta[thetaId * pitch + phiId] -
+		    velTheta[thetaId * pitch + (phiId + nPhiGlobal / 2) % nPhiGlobal]);
     }
     if (thetaId != nThetaGlobal - 1) {
 	v2 = velTheta[thetaId * pitch + phiWestId];
 	v3 = velTheta[thetaId * pitch + phiId];
+    } else {
+	v2 = 0.5 * (velTheta[thetaNorthId * pitch + phiWestId] -
+		    velTheta[thetaNorthId * pitch + (phiWestId + nPhiGlobal / 2) % nPhiGlobal]);
+	v3 = 0.5 * (velTheta[thetaNorthId * pitch + phiId] -
+		    velTheta[thetaNorthId * pitch + (phiId + nPhiGlobal / 2) % nPhiGlobal]);
     }
     
     // values at uPhi grid
@@ -954,7 +978,6 @@ __global__ void applyforcevelphiKernel
     // pupy = \frac{\partial u_phi}{\partial\theta}
     fReal pupyNorth = 0.0;
     fReal pupySouth = 0.0;
-    fReal pupy = 0.0;
     fReal u1 = velPhiInput[thetaId * pitch + phiId];
     fReal u3 = 0.0;
     fReal u4 = 0.0;
@@ -963,26 +986,20 @@ __global__ void applyforcevelphiKernel
     if (thetaId != 0) {
         u3 = velPhiInput[thetaNorthId * pitch + phiId];
 	pupyNorth = invGridLenGlobal * (u1 - u3);
+    } else {
+	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
+	u3 = -velPhiInput[thetaId * pitch + oppositePhiId];
     }
     // actually pupySouth != 0 at theta == \pi, but pupySouth appears only
     // in sinSouth * pupySouth, and sinSouth = 0 at theta == \pi   
     if (thetaId != nThetaGlobal - 1) {
 	u4 = velPhiInput[thetaSouthId * pitch + phiId];
 	pupySouth = invGridLenGlobal * (u4 - u1);
-    }
-    if (thetaId == 0) {
-	// boundary condition u_\phi = 0 at \theta = 0;
-	fReal uNorth = 0.0;
-	fReal uSouth = 0.5 * (u1 + u4);
-	pupy = invGridLenGlobal * (uSouth - uNorth);	
-    } else if (thetaId == nThetaGlobal - 1) {
-	fReal uNorth = 0.5 * (u3 + u1);
-	// boundary condition u_\phi = 0 at \theta = \pi;
-	fReal uSouth = 0.0;
-	pupy = invGridLenGlobal * (uSouth - uNorth);
     } else {
-	pupy = 0.5 * invGridLenGlobal * (u4 - u3);
+	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
+	u4 = -velPhiInput[thetaId * pitch + oppositePhiId];
     }
+    fReal pupy = 0.5 * invGridLenGlobal * (u4 - u3);
 
     // pGpx = \frac{\partial\Gamma}{\partial\phi};
     fReal pGpx = invGridLenGlobal * (GammaEast - GammaWest);
@@ -1001,6 +1018,7 @@ __global__ void applyforcevelphiKernel
     fReal pDpx = invGridLenGlobal * (DeltaEast - DeltaWest);
 
     // pDpy = \frac{\partial\Delta}{\partial\theta}
+    // TODO: do we need to average the thickness value at the pole?
     fReal pDpy = 0.0;
     fReal d0 = 0.0;
     fReal d1 = 0.0;
@@ -1009,24 +1027,18 @@ __global__ void applyforcevelphiKernel
     if (thetaId != 0) {
 	d0 = thickness[thetaNorthId * pitch + phiWestId];
 	d2 = thickness[thetaNorthId * pitch + phiId];
-    } 
+    } else {
+	d0 = thickness[thetaId * pitch + (phiWestId + nPhiGlobal / 2) % nPhiGlobal];
+	d2 = thickness[thetaId * pitch + (phiId + nPhiGlobal / 2) % nPhiGlobal];
+    }
     if (thetaId != nThetaGlobal - 1) {
 	d1 = thickness[thetaSouthId * pitch + phiWestId];
 	d3 = thickness[thetaSouthId * pitch + phiId];
-    }
-    if (thetaId == 0) {
-	// boundary condition \frac{\partial\Delta}{\partial\theta} = 0 at \theta = 0;
-	fReal pDpyNorth = 0.0;
-	fReal pDpySouth = 0.5 * invGridLenGlobal * (d1 + d3 - DeltaWest - DeltaEast);
-	pDpy = 0.5 * (pDpyNorth + pDpySouth);
-    } else if (thetaId == nThetaGlobal - 1) {
-	fReal pDpyNorth = 0.5 * invGridLenGlobal * (DeltaWest + DeltaEast - d0 - d2);
-	// boundary condition \frac{\partial\Delta}{\partial\theta} = 0 at \theta = \pi;
-	fReal pDpySouth = 0.0;
-	pDpy = 0.5 * (pDpyNorth + pDpySouth);
     } else {
-	pDpy = 0.25 * invGridLenGlobal * (d1 + d3 - d0 - d2);
+	d1 = thickness[thetaId * pitch + (phiWestId + nPhiGlobal / 2) % nPhiGlobal];
+	d3 = thickness[thetaId * pitch + (phiId + nPhiGlobal / 2) % nPhiGlobal];
     }
+    pDpy = 0.25 * invGridLenGlobal * (d1 + d3 - d0 - d2);
     
     // psspy = \frac{\partial}{\partial\theta}(\sin\theta\sigma_{12})
     fReal halfStep = 0.5 * gridLenGlobal;    
@@ -1036,11 +1048,12 @@ __global__ void applyforcevelphiKernel
     fReal sinSouth = sinf(thetaSouth);
     fReal cosNorth = cosf(thetaNorth);
     fReal cosSouth = cosf(thetaSouth);
-    fReal uPhiSouth = 0.5 * (u1 + u4);
-    fReal uPhiNorth = 0.5 * (u1 + u3);
+    // TODO: uncertain about the definintion of u_\phi at both poles
+    fReal uNorth = 0.5 * (u3 + u1);
+    fReal uSouth = 0.5 * (u1 + u4);
     fReal psspy = invRadiusGlobal * invGridLenGlobal * (invGridLenGlobal * (v0 + v3 - v1 - v2) +
 							sinSouth * pupySouth - sinNorth * pupyNorth -
-							cosSouth * uPhiSouth + cosNorth * uPhiNorth);
+							cosSouth * uSouth + cosNorth * uNorth);
     
     // pspx = \frac{\partial\sigma_{22}}{\partial\phi}
     fReal sigma22West = 2 * (2 * divWest - invRadiusGlobal * pvpyWest);
