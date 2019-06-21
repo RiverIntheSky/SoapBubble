@@ -10,7 +10,7 @@ const int m = 3;
 static __constant__ size_t nPhiGlobal;
 static __constant__ size_t nThetaGlobal;
 static __constant__ fReal gridLenGlobal;
-
+static __constant__ fReal timeStepGlobal;
 
 KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
 			   fReal A, int B, int C, int D, int E, fReal H) :
@@ -312,9 +312,13 @@ void KaminoSolver::adjustStepSize(fReal& dt, const fReal& eps) {
     delete[] gammaLarge;
 }
 
-void KaminoSolver::stepForward(fReal timeStep)
-{
+void KaminoSolver::setTimeStep(fReal timeStep) {
     this->timeStep = timeStep;
+    checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &(this->timeStep), sizeof(fReal)));
+}
+
+void KaminoSolver::stepForward(fReal timeStep) {
+    setTimeStep(timeStep);
 
 # ifdef PERFORMANCE_BENCHMARK
     KaminoTimer timer;

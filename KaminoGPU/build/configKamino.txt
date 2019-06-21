@@ -13,7 +13,7 @@ g 9.8
 rm 0.000000005
 numberOfGridsInTheta 128
 particleDensity 200.0
-timePerStep 0.000001
+timePerStep 0.0000005
 timePerFrame 0.02
 frameNumbers 1000
 A 0.0
