@@ -7,10 +7,6 @@
 
 const int fftRank = 1;
 const int m = 3;
-static __constant__ size_t nPhiGlobal;
-static __constant__ size_t nThetaGlobal;
-static __constant__ fReal gridLenGlobal;
-static __constant__ fReal timeStepGlobal;
 
 KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
 			   fReal A, int B, int C, int D, int E, fReal H) :
@@ -291,7 +287,11 @@ void KaminoSolver::adjustStepSize(fReal& dt, const fReal& epsilon) {
 						    maxAbsDifference(gammaSmall, gammaLarge, sizePhiAndCentered))));
 
 	// optimal step size
-	optTimeStep = dt * std::sqrt(epsilon*(m*m-1)/maxError);
+	std::cout << "maxError " << maxError << std::endl;
+	// std::cout << "epsilon " << epsilon << std::endl;
+	// std::cout << "dt " << dt << std::endl;
+	optTimeStep = dt * std::sqrt(epsilon* (m*m-1)/maxError);
+		// std::cout << "opt " << optTimeStep << std::endl;
 
 	if ((optTimeStep > 2 * dt || dt > 2 * optTimeStep) && loop < 2) {
 	    loop++;
@@ -312,19 +312,13 @@ void KaminoSolver::adjustStepSize(fReal& dt, const fReal& epsilon) {
     delete[] gammaLarge;
 }
 
-void KaminoSolver::setTimeStep(fReal timeStep) {
-    this->timeStep = timeStep;
-    checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &(this->timeStep), sizeof(fReal)));
-}
-
 void KaminoSolver::stepForward(fReal timeStep) {
-    setTimeStep(timeStep);
 
 # ifdef PERFORMANCE_BENCHMARK
     KaminoTimer timer;
     timer.startTimer();
 # endif
-    advection();
+    advection(timeStep);
 # ifdef PERFORMANCE_BENCHMARK
     this->advectionTime += timer.stopTimer() * 0.001f;
     timer.startTimer();

@@ -2,19 +2,6 @@
 # include "../include/KaminoGPU.cuh"
 # include "../include/KaminoTimer.cuh"
 
-static __constant__ size_t nPhiGlobal;
-static __constant__ size_t nThetaGlobal;
-static __constant__ fReal invRadiusGlobal;
-static __constant__ fReal radiusGlobal;
-static __constant__ fReal timeStepGlobal;
-static __constant__ fReal gridLenGlobal;
-static __constant__ fReal invGridLenGlobal;
-static __constant__ fReal SGlobal;
-static __constant__ fReal MGlobal;
-static __constant__ fReal reGlobal;
-static __constant__ fReal gGlobal;
-static __constant__ fReal DsGlobal;
-
 __device__ bool validateCoord(fReal& phi, fReal& theta) {
     bool ret = false;
     // assume theta lies not too far away from the interval [0, nThetaGlobal],
@@ -471,10 +458,12 @@ __global__ void advectionAllCentered
 //     output[2 * particleId + 1] = updatedTheta;
 // }
 
-void KaminoSolver::advection()
+void KaminoSolver::advection(fReal& dt)
 {
     // kernel call goes here
     // Advect Phi
+    checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &dt, sizeof(fReal)));
+	
     dim3 gridLayout;
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
@@ -1491,12 +1480,13 @@ void Kamino::run()
     float T = 0.0;              // simulation time
     for (int i = 1; i < frames; i++)
 	{
-	    //solver.adjustStepSize(dt, epsilon);
-	    //dt = std::min(dt, DT);
+	    if (i > 1)
+		solver.adjustStepSize(dt, epsilon);
 	    std::cout << "current time step size is " << dt << " s" << std::endl;
 	    std::cout << "steps needed until next frame " << DT/dt*U << std::endl;
 	    while (T < i*DT && !solver.isBroken())
 		{
+		    
 		    solver.stepForward(dt);
 		    T += dt/this->U;
 		}

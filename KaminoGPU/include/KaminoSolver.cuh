@@ -3,6 +3,19 @@
 # include "../include/KaminoQuantity.cuh"
 # include "../include/KaminoParticles.cuh"
 
+static __constant__ size_t nPhiGlobal;
+static __constant__ size_t nThetaGlobal;
+static __constant__ fReal invRadiusGlobal;
+static __constant__ fReal radiusGlobal;
+static __constant__ fReal timeStepGlobal;
+static __constant__ fReal gridLenGlobal;
+static __constant__ fReal invGridLenGlobal;
+static __constant__ fReal SGlobal;
+static __constant__ fReal MGlobal;
+static __constant__ fReal reGlobal;
+static __constant__ fReal gGlobal;
+static __constant__ fReal DsGlobal;
+
 class KaminoSolver
 {
 private:
@@ -85,7 +98,7 @@ private:
     float projectionTime;
 
     /// Kernel calling from here
-    void advection();
+    void advection(fReal& timeStep);
     void geometric();
     void bodyforce();
     void projection();
@@ -117,7 +130,6 @@ public:
     void initThicknessfromPic(std::string path);
     void initParticlesfromPic(std::string path, size_t parPergrid);
 
-    void setTimeStep(fReal timeStep);
     void copyToCPU(KaminoQuantity* quantity, fReal* cpubuffer);
     fReal maxAbsDifference(const fReal* A, const fReal* B, const size_t& size);
     void adjustStepSize(fReal& timeStep, const fReal& eps);
