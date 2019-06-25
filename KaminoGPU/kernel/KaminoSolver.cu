@@ -72,7 +72,7 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     initWithConst(this->velPhi, 0.0);
     // initialize_velocity();
     initWithConst(this->velTheta, 0.0);
-    // initWithConst(this->thickness, 1.0);
+    initWithConst(this->thickness, 1.0);
     initWithConst(this->bulkConcentration, 1.0);
     initWithConst(this->surfConcentration, 1.0);
 
@@ -293,7 +293,7 @@ void KaminoSolver::adjustStepSize(fReal& dt, const fReal& epsilon) {
 	// optimal step size
 	optTimeStep = dt * std::sqrt(epsilon*(m*m-1)/maxError);
 
-	if ((optTimeStep > 2 * dt || dt > 2 * optTimeStep) && loop < 1) {
+	if ((optTimeStep > 2 * dt || dt > 2 * optTimeStep) && loop < 2) {
 	    loop++;
 	    dt = sqrt(dt * optTimeStep);	
 	} else {
@@ -332,7 +332,6 @@ void KaminoSolver::stepForward(fReal timeStep) {
     bodyforce();
 # ifdef PERFORMANCE_BENCHMARK
     this->bodyforceTime += timer.stopTimer() * 0.001f;
-    timer.startTimer();
 # endif
 
     this->timeElapsed += timeStep;
@@ -388,12 +387,9 @@ void KaminoSolver::initThicknessfromPic(std::string path)
 	    return;
 	}
 
-    cv::Mat image_Flipped;
-    cv::flip(image_In, image_Flipped, 1);
-
     cv::Mat image_Resized;
     cv::Size size(nPhi, nTheta);
-    cv::resize(image_Flipped, image_Resized, size);
+    cv::resize(image_In, image_Resized, size);
     // cv::namedWindow( "window", cv::WINDOW_AUTOSIZE );
     // cv::imshow("window", image_Resized);
     // cv::waitKey(0);
@@ -451,10 +447,10 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 		this->setBroken(true);
 		return;
 	    } else {
-		Delta = Delta * this->H * 5e5; // Delta = 1 <==> thickness = 2000nm
-		images[0][j*nPhi+i] = Delta;
-		images[1][j*nPhi+i] = Delta;
-		images[2][j*nPhi+i] = Delta;
+		// Delta = 1 <==> thickness = 2000nm
+		images[0][j*nPhi+i] = Delta * this->H * 5e5;
+		images[1][j*nPhi+i] = Delta * this->H * 5e5;
+		images[2][j*nPhi+i] = Delta * this->H * 5e5;
 	    }
 	}
     }
