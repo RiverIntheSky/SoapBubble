@@ -291,7 +291,7 @@ void KaminoSolver::adjustStepSize(fReal& dt, const fReal& epsilon) {
 	// std::cout << "epsilon " << epsilon << std::endl;
 	// std::cout << "dt " << dt << std::endl;
 	optTimeStep = dt * std::sqrt(epsilon* (m*m-1)/maxError);
-		// std::cout << "opt " << optTimeStep << std::endl;
+	std::cout << "opt " << optTimeStep << std::endl;
 
 	if ((optTimeStep > 2 * dt || dt > 2 * optTimeStep) && loop < 2) {
 	    loop++;
@@ -313,12 +313,18 @@ void KaminoSolver::adjustStepSize(fReal& dt, const fReal& epsilon) {
 }
 
 void KaminoSolver::stepForward(fReal timeStep) {
+    advection(timeStep);
+    bodyforce();
+}
 
+void KaminoSolver::stepForward() {
+    this->timeStep = timeStep;
+    
 # ifdef PERFORMANCE_BENCHMARK
     KaminoTimer timer;
     timer.startTimer();
 # endif
-    advection(timeStep);
+    advection();
 # ifdef PERFORMANCE_BENCHMARK
     this->advectionTime += timer.stopTimer() * 0.001f;
     timer.startTimer();
@@ -328,7 +334,7 @@ void KaminoSolver::stepForward(fReal timeStep) {
     this->bodyforceTime += timer.stopTimer() * 0.001f;
 # endif
 
-    this->timeElapsed += timeStep;
+    this->timeElapsed += this->timeStep;
 }
 
 void KaminoSolver::swapVelocityBuffers()

@@ -99,6 +99,7 @@ private:
 
     /// Kernel calling from here
     void advection(fReal& timeStep);
+    void advection();
     void geometric();
     void bodyforce();
     void projection();
@@ -134,6 +135,7 @@ public:
     fReal maxAbsDifference(const fReal* A, const fReal* B, const size_t& size);
     void adjustStepSize(fReal& timeStep, const fReal& eps);
     void stepForward(fReal timeStep);
+    void stepForward();
     bool isBroken();
     void setBroken(bool broken);
 

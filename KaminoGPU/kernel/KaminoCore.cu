@@ -458,12 +458,15 @@ __global__ void advectionAllCentered
 //     output[2 * particleId + 1] = updatedTheta;
 // }
 
-void KaminoSolver::advection(fReal& dt)
+void KaminoSolver::advection(fReal& dt) {
+    checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &dt, sizeof(fReal)));
+    advection();
+}
+
+void KaminoSolver::advection()
 {
     // kernel call goes here
     // Advect Phi
-    checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &dt, sizeof(fReal)));
-	
     dim3 gridLayout;
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
@@ -766,6 +769,8 @@ __global__ void applyforcevelthetaKernel
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
 
+    // if (thetaId == 13 && phiId == 51)
+    // 	printf("dt %f\n", timeStepGlobal);
     // Coord in phi-theta space
     fReal gTheta = ((fReal)thetaId + vThetaThetaOffset) * gridLenGlobal;
 
@@ -1480,14 +1485,16 @@ void Kamino::run()
     float T = 0.0;              // simulation time
     for (int i = 1; i < frames; i++)
 	{
-	    if (i > 1)
-		solver.adjustStepSize(dt, epsilon);
+	    solver.adjustStepSize(dt, epsilon);
+	    dt = 0.0000005;
+	    checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &dt, sizeof(fReal)));
 	    std::cout << "current time step size is " << dt << " s" << std::endl;
 	    std::cout << "steps needed until next frame " << DT/dt*U << std::endl;
+	    
 	    while (T < i*DT && !solver.isBroken())
 		{
 		    
-		    solver.stepForward(dt);
+		    solver.stepForward();
 		    T += dt/this->U;
 		}
 	    if (solver.isBroken()) {
