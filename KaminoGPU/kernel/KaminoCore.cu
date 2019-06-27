@@ -743,23 +743,16 @@ __global__ void comDivergenceKernel
 
     uWest = velPhi[thetaId * velPhiPitchInElements + phiIdWest];
     uEast = velPhi[thetaId * velPhiPitchInElements + phiIdEast];
-
+    
     if (thetaId != 0) {
 	size_t thetaNorthIdx = thetaId - 1;
 	vNorth = velTheta[thetaNorthIdx * velThetaPitchInElements + phiId];
-    } else {
-	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
-	vNorth = 0.5 * (velTheta[thetaId * velThetaPitchInElements + phiId] -
-			velTheta[thetaId * velThetaPitchInElements + oppositePhiId]);
-    }
+    } 
     if (thetaId != nThetaGlobal - 1) {
 	size_t thetaSouthIdx = thetaId;
 	vSouth = velTheta[thetaSouthIdx * velThetaPitchInElements + phiId];
-    } else {
-	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
-	vSouth = 0.5 * (velTheta[thetaId * velThetaPitchInElements + phiId] -
-			velTheta[thetaId * velThetaPitchInElements + oppositePhiId]);
     }
+    // otherwise sin(theta) = 0;
 
     fReal invGridSine = 1.0 / sinf(thetaCoord);
     fReal sinNorth = sinf(thetaNorth);
