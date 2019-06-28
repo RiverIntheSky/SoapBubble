@@ -1431,24 +1431,23 @@ void KaminoSolver::projection()
 }
 
 Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
-	       fReal sigma_a, fReal R, fReal T, fReal rho, fReal mu,
-	       fReal Ds, fReal g,  fReal rm, size_t nTheta, fReal particleDensity,
+	       fReal T, fReal Ds, fReal rm, size_t nTheta, 
 	       float dt, float DT, int frames, fReal A, int B, int C, int D, int E,
-	       std::string thicknessPath, std::string particlePath,
+	       std::string thicknessPath, std::string velocityPath,
 	       std::string thicknessImage, std::string solidImage, std::string colorImage) :
-    radius(radius), invRadius(1/radius), H(H), U(U), c_m(c_m), Gamma_m(Gamma_m), sigma_a(sigma_a), R(R), T(T),
-    rho(rho), mu(mu), Ds(Ds), g(g/(U*U)), rm(rm), epsilon(H), sigma_r(R*T),
-    M(Gamma_m*R*T/(3*rho*H*U*U)), S(sigma_a*H/(2*mu*U)), re(mu/(rho*U)),
+    radius(radius), invRadius(1/radius), H(H), U(U), c_m(c_m), Gamma_m(Gamma_m), T(T),
+    Ds(Ds), gs(g/(U*U)), rm(rm), epsilon(H), sigma_r(R*T), M(Gamma_m*R*T/(3*rho*H*U*U)),
+    S(sigma_a*H/(2*mu*U)), re(mu/(rho*U)), Cr(rhoa*sqrt(mua)/(rho*U*H)),
     nTheta(nTheta), nPhi(2 * nTheta),
-    gridLen(M_PI / nTheta), invGridLen(nTheta / M_PI), particleDensity(particleDensity),
+    gridLen(M_PI / nTheta), invGridLen(nTheta / M_PI), 
     dt(dt), DT(DT), frames(frames),
     A(A), B(B), C(C), D(D), E(E),
-    thicknessPath(thicknessPath), particlePath(particlePath),
+    thicknessPath(thicknessPath), velocityPath(velocityPath),
     thicknessImage(thicknessImage), solidImage(solidImage), colorImage(colorImage)
 {
     std::cout << "Re^-1 " << re << std::endl;
     std::cout << "S " << S << std::endl;
-    std::cout << "inv radius " << invRadius << std::endl;
+    std::cout << "Cr " << Cr << std::endl;
 }
 
 Kamino::~Kamino()
@@ -1472,17 +1471,16 @@ void Kamino::run()
     checkCudaErrors(cudaMemcpyToSymbol(SGlobal, &(this->S), sizeof(fReal)));
     checkCudaErrors(cudaMemcpyToSymbol(MGlobal, &(this->M), sizeof(fReal)));
     checkCudaErrors(cudaMemcpyToSymbol(reGlobal, &(this->re), sizeof(fReal)));
-    checkCudaErrors(cudaMemcpyToSymbol(gGlobal, &(this->g), sizeof(fReal)));
+    checkCudaErrors(cudaMemcpyToSymbol(gGlobal, &(this->gs), sizeof(fReal)));
     checkCudaErrors(cudaMemcpyToSymbol(DsGlobal, &(this->Ds), sizeof(fReal)));
+    checkCudaErrors(cudaMemcpyToSymbol(CrGlobal, &(this->Cr), sizeof(fReal)));
+    checkCudaErrors(cudaMemcpyToSymbol(UGlobal, &(this->U), sizeof(fReal)));
 
 # ifdef WRITE_THICKNESS_DATA
     solver.write_thickness_img(thicknessPath, 0);
 # endif  
 # ifdef WRITE_VELOCITY_DATA
-    solver.write_data_bgeo(gridPath, 0);
-# endif
-# ifdef WRITE_PARTICLES
-    solver.write_particles_bgeo(particlePath, 0);
+    solver.write_velocity_image(velocityPath, 0);
 # endif
 
 # ifdef PERFORMANCE_BENCHMARK

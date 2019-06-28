@@ -53,12 +53,19 @@ const size_t byte2Bits = 8;
 const fReal density = 1000.0;
 const fReal uSolid = 0.0;
 const fReal vSolid = 0.0;
+const fReal R = 8.3144598;              // gas constant. J mol^-1 K^-1
+const fReal sigma_a = 0.07275;		// surface tension of water. N m^-1
+const fReal rho = 997;			// bulk fluid density. kg m^-3
+const fReal mu = 0.0010005;		// water dynamic viscosity. Pa s
+const fReal g = 9.8;			// standard gravity. m s^-2
+const fReal rhoa = 1.184;		// air density. kg m^-3
+const fReal mua = 1.849e-5;		// air dynamic viscosity. Pa s
 
 enum gridType { FLUIDGRID, SOLIDGRID };
 
 enum Coord { phi, theta };
 
-// # define WRITE_VELOCITY_DATA
+# define WRITE_VELOCITY_DATA
 // # define WRITE_PARTICLES
 # define WRITE_THICKNESS_DATA
 # define RUNGE_KUTTA

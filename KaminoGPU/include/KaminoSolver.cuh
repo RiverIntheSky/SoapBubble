@@ -8,6 +8,7 @@ static __constant__ size_t nThetaGlobal;
 static __constant__ fReal invRadiusGlobal;
 static __constant__ fReal radiusGlobal;
 static __constant__ fReal timeStepGlobal;
+static __constant__ fReal currentTimeGlobal;
 static __constant__ fReal gridLenGlobal;
 static __constant__ fReal invGridLenGlobal;
 static __constant__ fReal SGlobal;
@@ -15,6 +16,8 @@ static __constant__ fReal MGlobal;
 static __constant__ fReal reGlobal;
 static __constant__ fReal gGlobal;
 static __constant__ fReal DsGlobal;
+static __constant__ fReal CrGlobal;
+static __constant__ fReal UGlobal;
 
 class KaminoSolver
 {

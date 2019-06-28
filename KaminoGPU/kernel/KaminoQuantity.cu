@@ -69,6 +69,7 @@ void KaminoQuantity::setCPUValueAt(size_t phi, size_t theta, fReal val)
 
 fReal& KaminoQuantity::accessCPUValueAt(size_t phi, size_t theta)
 {
+    assert(theta >= 0 && theta < nTheta && phi >= 0 && phi < nPhi);
     return this->cpuBuffer[theta * nPhi + phi];
 }
 
