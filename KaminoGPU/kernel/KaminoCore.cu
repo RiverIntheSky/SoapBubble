@@ -855,7 +855,7 @@ __global__ void applyforcevelthetaKernel
     fReal pupx = 0.5 * invGridLenGlobal * (u1 + u3 - u0 - u2);
 
     // pupxy = \frac{\partial^2u_\phi}{\partial\theta\partial\phi}
-    fReal pupxy = 0.25 * invGridLenGlobal * invGridLenGlobal * (u0 + u3 - u1 - u2);
+    fReal pupxy = invGridLenGlobal * invGridLenGlobal * (u0 + u3 - u1 - u2);
 
     // pvpxx = \frac{\partial^2u_\theta}{\partial\phi^2}    
     fReal pvpxx = invGridLenGlobal * invGridLenGlobal * (v3 + v4 - 2 * v1);
@@ -1087,8 +1087,9 @@ __global__ void applyforceThickness
     int thetaId = blockIdx.x / splitVal;
 
     fReal delta = thicknessInput[thetaId * pitch + phiId];
-    fReal f = -div[thetaId * nPhiGlobal + phiId] * delta;
-    thicknessOutput[thetaId * pitch + phiId] = f * timeStepGlobal * delta + delta;
+    fReal f = -div[thetaId * nPhiGlobal + phiId];
+    // implicit
+    thicknessOutput[thetaId * pitch + phiId] = delta / (1 + timeStepGlobal * f);
 }
 
 __global__ void applyforceSurfConcentration
