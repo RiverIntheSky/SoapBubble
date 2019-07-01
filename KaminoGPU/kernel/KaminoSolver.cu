@@ -229,7 +229,7 @@ fReal KaminoSolver::maxAbsDifference(const fReal* A, const fReal* B, const size_
     return res;
 }
 
-void KaminoSolver::adjustStepSize(fReal& dt, const fReal& epsilon) {
+void KaminoSolver::adjustStepSize(fReal& dt, const fReal& U, const fReal& epsilon) {
     copyVelocityBack2CPU();
     thickness->copyBackToCPU();
     surfConcentration->copyBackToCPU();
@@ -399,10 +399,8 @@ void KaminoSolver::initThicknessfromPic(std::string path)
 	    for (size_t j = 0; j < nTheta; ++j)
 		{
 		    cv::Point3_<uchar>* p = image_Resized.ptr<cv::Point3_<uchar>>(j, i);
-		    fReal B = p->x / 255.0; // B
-		    fReal G = p->y / 255.0; // G
-		    fReal R = p->z / 255.0; // R
-		    this->thickness->setCPUValueAt(i, j, (B + G + R) / 3.0);
+		    fReal C = p->x / 255.0; // B
+		    this->thickness->setCPUValueAt(i, j, C);
 		}
 	}
 

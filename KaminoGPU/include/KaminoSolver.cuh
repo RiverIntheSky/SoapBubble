@@ -39,7 +39,7 @@ private:
     fReal* gpuFReal;
     fReal* gpuFImag;
     fReal* gpuFZeroComponent;
-
+    
     // Buffer for elements that can be precomputed
     fReal* div;
 
@@ -136,7 +136,7 @@ public:
 
     void copyToCPU(KaminoQuantity* quantity, fReal* cpubuffer);
     fReal maxAbsDifference(const fReal* A, const fReal* B, const size_t& size);
-    void adjustStepSize(fReal& timeStep, const fReal& eps);
+    void adjustStepSize(fReal& timeStep, const fReal& U, const fReal& eps);
     void stepForward(fReal timeStep);
     void stepForward();
     bool isBroken();
