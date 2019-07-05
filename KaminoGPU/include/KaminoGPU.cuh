@@ -49,8 +49,7 @@ private:
     std::string solidImage;	  // file path of SOLIDCELL image map
     std::string colorImage;       // file path of image defining particle color
 
-
-    vec3* colorMap;
+    fReal particleDensity;	  // how many particles in a grid cell
 
 public:
     Kamino(fReal radius = 0.05, fReal H = 0.0000005, fReal U = 1.0, fReal c_m = 0.5,
@@ -58,8 +57,8 @@ public:
 	   fReal rm = 0.000000005,size_t nTheta = 128, float dt = 0.005,
 	   float DT = 1.0 / 24.0, int frames = 1000,
 	   fReal A = 0.0, int B = 1, int C = 1, int D = 1, int E = 1,
-	   std::string thicknessPath = "output/frame", std::string particlePath = "particles/frame",
-	   std::string thicknessImage = "", std::string solidImage = "", std::string colorImage = "");
+	   std::string thicknessPath = "output/frame", std::string velocityPath = "output/vel",
+	   std::string thicknessImage = "", size_t particleDensity = 8);
     ~Kamino();
 
     /* run the solver */

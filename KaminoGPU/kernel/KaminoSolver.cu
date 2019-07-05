@@ -6,7 +6,18 @@
 // CONSTRUCTOR / DESTRUCTOR >>>>>>>>>>
 
 const int fftRank = 1;
-const int m = 3;
+static const int m = 3;
+static __constant__ size_t nPhiGlobal;
+static __constant__ size_t nThetaGlobal;
+static __constant__ fReal gridLenGlobal;
+
+__global__ void initParticleValues(fReal* particleVal, fReal* particleCoord, fReal* thickness, size_t pitch) {
+    int particleId = blockIdx.x * blockDim.x + threadIdx.x;
+    fReal phi = particleCoord[2 * particleId];
+    fReal theta = particleCoord[2 * particleId + 1];
+
+    particleVal[particleId] = sampleCentered(thickness, phi * invGridLenGlobal, theta * invGridLenGlobal, pitch);
+}
 
 KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
 			   fReal A, int B, int C, int D, int E, fReal H) :
@@ -39,6 +50,8 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 			       sizeof(fReal) * nTheta));
 
     checkCudaErrors(cudaMalloc((void **)(&div),
+			       sizeof(fReal) * nPhi * nTheta));
+    checkCudaErrors(cudaMalloc((void **)(&weight),
 			       sizeof(fReal) * nPhi * nTheta));
 
     checkCudaErrors(cudaMalloc((void **)(&gpuA),
@@ -92,6 +105,7 @@ KaminoSolver::~KaminoSolver()
     checkCudaErrors(cudaFree(gpuFZeroComponent));
 
     checkCudaErrors(cudaFree(div));
+    checkCudaErrors(cudaFree(weight));
 		    
     checkCudaErrors(cudaFree(gpuA));
     checkCudaErrors(cudaFree(gpuB));
@@ -372,13 +386,13 @@ void KaminoSolver::setBroken(bool broken) {
     this->broken = broken;
 }
 
-void KaminoSolver::initThicknessfromPic(std::string path)
+void KaminoSolver::initThicknessfromPic(std::string path, size_t particleDensity)
 {
     if (path == "")
 	{
 	    return;
 	}
-    cv::Mat image_In;
+    cv::Mat image_In, image_Flipped;
     image_In = cv::imread(path, cv::IMREAD_COLOR);
     std::cout << path << std::endl;
     if (!image_In.data)
@@ -388,11 +402,9 @@ void KaminoSolver::initThicknessfromPic(std::string path)
 	}
 
     cv::Mat image_Resized;
+    cv::flip(image_In, image_Flipped, 1);
     cv::Size size(nPhi, nTheta);
-    cv::resize(image_In, image_Resized, size);
-    // cv::namedWindow( "window", cv::WINDOW_AUTOSIZE );
-    // cv::imshow("window", image_Resized);
-    // cv::waitKey(0);
+    cv::resize(image_Flipped, image_Resized, size);
 
     for (size_t i = 0; i < nPhi; ++i)
 	{
@@ -405,6 +417,15 @@ void KaminoSolver::initThicknessfromPic(std::string path)
 	}
 
     this->thickness->copyToGPU();
+    this->particles = new KaminoParticles(path, particleDensity, gridLen, nTheta);
+
+    dim3 gridLayout;
+    dim3 blockLayout;
+    determineLayout(gridLayout, blockLayout, 1, this->particles->numOfParticles);
+    initParticleValues<<<gridLayout, blockLayout>>>
+	(this->particles->value, this->particles->coordGPUThisStep, this->thickness->getGPUThisStep(), this->thickness->getThisStepPitchInElements());
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
 }
 
 void KaminoSolver::initParticlesfromPic(std::string path, size_t parPerGrid)

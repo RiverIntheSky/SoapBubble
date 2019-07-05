@@ -14,7 +14,7 @@ int main(int argc, char** argv)
 	    float dt; float DT; int frames;
 	    float A; int B; int C; int D; int E;
 	    std::string thicknessPath; std::string velocityPath;
-	    std::string thicknessImage; std::string solidImage; std::string colorImage;
+	    std::string thicknessImage; size_t particleDensity;
 	    std::string attrib;
 
 	    fin >> attrib;  fin >> r;
@@ -37,25 +37,16 @@ int main(int argc, char** argv)
 	    fin >> attrib;  fin >> thicknessPath;
 	    fin >> attrib;  fin >> velocityPath;
 	    fin >> attrib;  fin >> thicknessImage;
+	    fin >> attrib;  fin >> particleDensity;
 	
 	    if (thicknessImage == "null")
 		{
 		    thicknessImage = "";
 		}
-	    fin >> solidImage;
-	    if (solidImage == "null")
-		{
-		    solidImage == "";
-		}
-	    fin >> colorImage;
-	    if (colorImage == "null")
-		{
-		    colorImage = "";
-		}
 
 	    Kamino KaminoInstance(r, H, U, c_m, Gamma_m, T, Ds, rm,
 				  nTheta, dt, DT, frames, A, B, C, D, E,
-				  thicknessPath, velocityPath, thicknessImage, solidImage, colorImage);
+				  thicknessPath, velocityPath, thicknessImage, particleDensity);
 	    KaminoInstance.run();
 	    return 0;
 	}

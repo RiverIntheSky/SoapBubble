@@ -3,21 +3,9 @@
 # include "../include/KaminoQuantity.cuh"
 # include "../include/KaminoParticles.cuh"
 
-static __constant__ size_t nPhiGlobal;
-static __constant__ size_t nThetaGlobal;
-static __constant__ fReal invRadiusGlobal;
-static __constant__ fReal radiusGlobal;
-static __constant__ fReal timeStepGlobal;
-static __constant__ fReal currentTimeGlobal;
-static __constant__ fReal gridLenGlobal;
-static __constant__ fReal invGridLenGlobal;
-static __constant__ fReal SGlobal;
-static __constant__ fReal MGlobal;
-static __constant__ fReal reGlobal;
-static __constant__ fReal gGlobal;
-static __constant__ fReal DsGlobal;
-static __constant__ fReal CrGlobal;
-static __constant__ fReal UGlobal;
+extern __constant__ fReal invGridLenGlobal;
+
+__device__ fReal sampleCentered(fReal* input, fReal phiRawId, fReal thetaRawId, size_t pitch);
 
 class KaminoSolver
 {
@@ -42,6 +30,7 @@ private:
     
     // Buffer for elements that can be precomputed
     fReal* div;
+    fReal* weight;
 
     /// Precompute these!
     // nPhi by nTheta elements, but they should be retrieved by shared memories
@@ -131,7 +120,7 @@ public:
     ~KaminoSolver();
 
     void initWithConst(KaminoQuantity* attrib, fReal val);
-    void initThicknessfromPic(std::string path);
+    void initThicknessfromPic(std::string path, size_t particleDensity);
     void initParticlesfromPic(std::string path, size_t parPergrid);
 
     void copyToCPU(KaminoQuantity* quantity, fReal* cpubuffer);
