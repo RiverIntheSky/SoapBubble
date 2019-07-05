@@ -17,7 +17,7 @@ link_directories(${ZLIB_LIBRARIES})
 
 set(CMAKE_C_COMPILER /usr/bin/gcc-6)
 set(CMAKE_CXX_COMPILER  /usr/bin/g++-6)
-
+# set(CMAKE_CXX_FLAGS "-Wall -Wextra -std=c++0x")
 set(CUDA_HOST_COMPILER  /usr/bin/g++-6)
 find_package(CUDA REQUIRED)
 include_directories(/opt/cuda/include)

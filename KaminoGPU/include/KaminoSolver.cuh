@@ -143,8 +143,9 @@ public:
     void setBroken(bool broken);
 
     void write_thickness_img(const std::string& s, const int frame);
-    void write_data_bgeo(const std::string& s, const int frame);
-    void write_particles_bgeo(const std::string& s, const int frame);
+    // void write_data_bgeo(const std::string& s, const int frame);
+    void write_image(const std::string& s, size_t width, size_t height, std::vector<float> *images);
+    void write_velocity_image(const std::string& s, const int frame);
 
     KaminoParticles* particles;
 };

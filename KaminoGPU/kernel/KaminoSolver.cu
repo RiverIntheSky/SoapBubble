@@ -412,6 +412,121 @@ void KaminoSolver::initParticlesfromPic(std::string path, size_t parPerGrid)
     this->particles = new KaminoParticles(path, parPerGrid, gridLen, nTheta);
 }
 
+void KaminoSolver::write_image(const std::string& s, size_t width, size_t height, std::vector<float> *images) {
+    const char *filename = s.c_str();
+    
+    EXRHeader header;
+    InitEXRHeader(&header);
+
+    EXRImage image;
+    InitEXRImage(&image);
+
+    image.num_channels = 3;
+
+    float* image_ptr[3];
+    image_ptr[0] = &(images[2].at(0)); // B
+    image_ptr[1] = &(images[1].at(0)); // G
+    image_ptr[2] = &(images[0].at(0)); // R
+
+    image.images = (unsigned char**)image_ptr;
+    image.width = width;
+    //    image.height = nTheta;
+    image.height = height;
+
+    header.num_channels = 3;
+    header.channels = (EXRChannelInfo *)malloc(sizeof(EXRChannelInfo) * header.num_channels); 
+    // Must be (A)BGR order, since most of EXR viewers expect this channel order.
+    strncpy(header.channels[0].name, "B", 255); header.channels[0].name[strlen("B")] = '\0';
+    strncpy(header.channels[1].name, "G", 255); header.channels[1].name[strlen("G")] = '\0';
+    strncpy(header.channels[2].name, "R", 255); header.channels[2].name[strlen("R")] = '\0';
+
+    header.pixel_types = (int *)malloc(sizeof(int) * header.num_channels); 
+    header.requested_pixel_types = (int *)malloc(sizeof(int) * header.num_channels);
+    for (int i = 0; i < header.num_channels; i++) {
+	header.pixel_types[i] = TINYEXR_PIXELTYPE_FLOAT; // pixel type of input image
+	header.requested_pixel_types[i] = TINYEXR_PIXELTYPE_HALF; // pixel type of output image to be stored in .EXR
+    }
+
+    const char* err = NULL; // or nullptr in C++11 or later.
+    int ret = SaveEXRImageToFile(&image, &header, filename, &err);
+    if (ret != TINYEXR_SUCCESS) {
+	fprintf(stderr, "Save EXR err: %s\n", err);
+	FreeEXRErrorMessage(err); // free's buffer for an error message
+	return;
+    }
+    printf("Saved exr file. [ %s ] \n", filename);
+
+    free(header.channels);
+    free(header.pixel_types);
+    free(header.requested_pixel_types);
+}
+
+void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
+    std::string file_string = std::to_string(frame);
+    while (file_string.length() < 4) {
+	file_string.insert(0, "0");
+    }
+    file_string.insert(0, s);
+    file_string.append(".exr");
+
+    copyVelocityBack2CPU();
+    std::vector<float> images[3];
+    images[0].resize(nPhi * nTheta);
+    images[1].resize(nPhi * nTheta);
+    images[2].resize(nPhi * nTheta);
+
+    fReal maxu = std::numeric_limits<fReal>::min();
+    fReal maxv = std::numeric_limits<fReal>::min();
+    fReal minu = std::numeric_limits<fReal>::max();
+    fReal minv = std::numeric_limits<fReal>::max();
+
+    for (size_t j = 0; j < nTheta; ++j) {
+	for (size_t i = 0; i < nPhi; ++i) {
+	    fReal uW = velPhi->getCPUValueAt(i, j);
+	    fReal uE;
+	    fReal vN;
+	    fReal vS;
+	    if (i != nPhi - 1) {
+	        uE = velPhi->getCPUValueAt(i + 1, j);		
+	    } else {
+		uE = velPhi->getCPUValueAt(0, j);	
+	    }
+	    if (j != 0) {
+		vN = velTheta->getCPUValueAt(i, j - 1);
+	    } else {
+		size_t oppositei = (i + nPhi/2) % nPhi;
+		vN = 0.75 * velTheta->getCPUValueAt(i, j) -
+		    0.25 * velTheta->getCPUValueAt(oppositei, j);
+	    }
+	    if (j != nTheta - 1) {
+		vS = velTheta->getCPUValueAt(i, j);
+	    } else {
+		size_t oppositei = (i + nPhi/2) % nPhi;
+		vS = 0.75 * velTheta->getCPUValueAt(i, j - 1) -
+		    0.25 * velTheta->getCPUValueAt(oppositei, j - 1);
+	    }
+	    fReal u = 0.5 * (uW + uE);
+	    fReal v = 0.5 * (vN + vS);
+	    if (u > maxu)
+		maxu = u;
+	    if (u < minu)
+		minu = u;
+	    if (v > maxv)
+		maxv = v;
+	    if (v < minv)
+		minv = v;
+	    images[0][j*nPhi+i] = u/2+0.5; // R
+	    images[1][j*nPhi+i] = v/2+0.5; // G
+	    images[2][j*nPhi+i] = 0.5; // B
+	}
+    }
+
+    std::cout << "max u = " << maxu << " min u = " << minu << std::endl;
+    std::cout << "max v = " << maxv << " min v = " << minv << std::endl;
+
+    write_image(file_string, nPhi, nTheta, images);
+}
+
 void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 {
     std::string file_string = std::to_string(frame);
@@ -421,17 +536,8 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
     file_string.insert(0, s);
     file_string.append(".exr");
     
-    const char *filename = file_string.c_str();
-
     thickness->copyBackToCPU();
-    
-    EXRHeader header;
-    InitEXRHeader(&header);
-
-    EXRImage image;
-    InitEXRImage(&image);
-
-    image.num_channels = 3;
+    // velTheta->copyBackToCPU();  
 
     std::vector<float> images[3];
     images[0].resize(nPhi * nTheta);
@@ -445,7 +551,6 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 		this->setBroken(true);
 		return;
 	    } else {
-		// Delta = 1 <==> thickness = 2000nm
 		images[0][j*nPhi+i] = Delta * this->H * 5e5;
 		images[1][j*nPhi+i] = Delta * this->H * 5e5;
 		images[2][j*nPhi+i] = Delta * this->H * 5e5;
@@ -453,162 +558,127 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 	}
     }
 
-    float* image_ptr[3];
-    image_ptr[0] = &(images[2].at(0)); // B
-    image_ptr[1] = &(images[1].at(0)); // G
-    image_ptr[2] = &(images[0].at(0)); // R
-
-    image.images = (unsigned char**)image_ptr;
-    image.width = nPhi;
-    image.height = nTheta;
-
-    header.num_channels = 3;
-    header.channels = (EXRChannelInfo *)malloc(sizeof(EXRChannelInfo) * header.num_channels); 
-    // Must be (A)BGR order, since most of EXR viewers expect this channel order.
-    strncpy(header.channels[0].name, "B", 255); header.channels[0].name[strlen("B")] = '\0';
-    strncpy(header.channels[1].name, "G", 255); header.channels[1].name[strlen("G")] = '\0';
-    strncpy(header.channels[2].name, "R", 255); header.channels[2].name[strlen("R")] = '\0';
-
-    header.pixel_types = (int *)malloc(sizeof(int) * header.num_channels); 
-    header.requested_pixel_types = (int *)malloc(sizeof(int) * header.num_channels);
-    for (int i = 0; i < header.num_channels; i++) {
-      header.pixel_types[i] = TINYEXR_PIXELTYPE_FLOAT; // pixel type of input image
-      header.requested_pixel_types[i] = TINYEXR_PIXELTYPE_HALF; // pixel type of output image to be stored in .EXR
-    }
-
-    const char* err = NULL; // or nullptr in C++11 or later.
-    int ret = SaveEXRImageToFile(&image, &header, filename, &err);
-    if (ret != TINYEXR_SUCCESS) {
-      fprintf(stderr, "Save EXR err: %s\n", err);
-      FreeEXRErrorMessage(err); // free's buffer for an error message
-      return;
-    }
-    printf("Saved exr file. [ %s ] \n", filename);
-
-    free(header.channels);
-    free(header.pixel_types);
-    free(header.requested_pixel_types);
-
+    write_image(file_string, nPhi, nTheta, images);
 }
 
-void KaminoSolver::write_data_bgeo(const std::string& s, const int frame)
-{
-    std::string file = s + std::to_string(frame) + ".bgeo";
-    std::cout << "Writing to: " << file << std::endl;
+// void KaminoSolver::write_data_bgeo(const std::string& s, const int frame)
+// {
+//     std::string file = s + std::to_string(frame) + ".bgeo";
+//     std::cout << "Writing to: " << file << std::endl;
 
-    Partio::ParticlesDataMutable* parts = Partio::create();
-    Partio::ParticleAttribute pH, vH, densityVal;
-    pH = parts->addAttribute("position", Partio::VECTOR, 3);
-    vH = parts->addAttribute("v", Partio::VECTOR, 3);
-    densityVal = parts->addAttribute("density", Partio::FLOAT, 1);
+//     Partio::ParticlesDataMutable* parts = Partio::create();
+//     Partio::ParticleAttribute pH, vH, densityVal;
+//     pH = parts->addAttribute("position", Partio::VECTOR, 3);
+//     vH = parts->addAttribute("v", Partio::VECTOR, 3);
+//     densityVal = parts->addAttribute("density", Partio::FLOAT, 1);
 
-    vec3 pos;
-    vec3 vel;
+//     vec3 pos;
+//     vec3 vel;
 
-    size_t iWest, iEast, jNorth, jSouth;
-    fReal uWest, uEast, vNorth, vSouth;
+//     size_t iWest, iEast, jNorth, jSouth;
+//     fReal uWest, uEast, vNorth, vSouth;
 
-    velPhi->copyBackToCPU();
-    velTheta->copyBackToCPU();
-    density->copyBackToCPU();
+//     velPhi->copyBackToCPU();
+//     velTheta->copyBackToCPU();
+//     density->copyBackToCPU();
 
-    for (size_t j = 0; j < nTheta; ++j)
-	{
-	    for (size_t i = 0; i < nPhi; ++i)
-		{
-		    iWest = i;
-		    uWest = velPhi->getCPUValueAt(iWest, j);
-		    i == (nPhi - 1) ? iEast = 0 : iEast = i + 1;
-		    uEast = velPhi->getCPUValueAt(iEast, j);
+//     for (size_t j = 0; j < nTheta; ++j)
+// 	{
+// 	    for (size_t i = 0; i < nPhi; ++i)
+// 		{
+// 		    iWest = i;
+// 		    uWest = velPhi->getCPUValueAt(iWest, j);
+// 		    i == (nPhi - 1) ? iEast = 0 : iEast = i + 1;
+// 		    uEast = velPhi->getCPUValueAt(iEast, j);
 
-		    if (j == 0)
-			{
-			    jNorth = jSouth = 0;
-			}
-		    else if (j == nTheta - 1)
-			{
-			    jNorth = jSouth = nTheta - 2;
-			}
-		    else
-			{
-			    jNorth = j - 1;
-			    jSouth = j;
-			}
-		    vNorth = velTheta->getCPUValueAt(i, jNorth);
-		    vSouth = velTheta->getCPUValueAt(i, jSouth);
+// 		    if (j == 0)
+// 			{
+// 			    jNorth = jSouth = 0;
+// 			}
+// 		    else if (j == nTheta - 1)
+// 			{
+// 			    jNorth = jSouth = nTheta - 2;
+// 			}
+// 		    else
+// 			{
+// 			    jNorth = j - 1;
+// 			    jSouth = j;
+// 			}
+// 		    vNorth = velTheta->getCPUValueAt(i, jNorth);
+// 		    vSouth = velTheta->getCPUValueAt(i, jSouth);
 
-		    fReal velocityPhi, velocityTheta;
-		    velocityPhi = (uWest + uEast) / 2.0;
-		    velocityTheta = (vNorth + vSouth) / 2.0;
+// 		    fReal velocityPhi, velocityTheta;
+// 		    velocityPhi = (uWest + uEast) / 2.0;
+// 		    velocityTheta = (vNorth + vSouth) / 2.0;
 
-		    pos = vec3((i + centeredPhiOffset) * gridLen, (j + centeredThetaOffset) * gridLen, 0.0);
-		    vel = vec3(0.0, velocityTheta, velocityPhi);
-		    mapVToSphere(pos, vel);
-		    mapPToSphere(pos);
+// 		    pos = vec3((i + centeredPhiOffset) * gridLen, (j + centeredThetaOffset) * gridLen, 0.0);
+// 		    vel = vec3(0.0, velocityTheta, velocityPhi);
+// 		    mapVToSphere(pos, vel);
+// 		    mapPToSphere(pos);
 
-		    float densityValuefloat = density->getCPUValueAt(i, j);
+// 		    float densityValuefloat = density->getCPUValueAt(i, j);
 
-		    int idx = parts->addParticle();
-		    float* p = parts->dataWrite<float>(pH, idx);
-		    float* v = parts->dataWrite<float>(vH, idx);
-		    float* d = parts->dataWrite<float>(densityVal, idx);
+// 		    int idx = parts->addParticle();
+// 		    float* p = parts->dataWrite<float>(pH, idx);
+// 		    float* v = parts->dataWrite<float>(vH, idx);
+// 		    float* d = parts->dataWrite<float>(densityVal, idx);
 			
-		    for (int k = 0; k < 3; ++k) 
-			{
-			    p[k] = pos[k];
-			    v[k] = vel[k];
-			}
-		    d[0] = densityValuefloat;
-		}
-	}
+// 		    for (int k = 0; k < 3; ++k) 
+// 			{
+// 			    p[k] = pos[k];
+// 			    v[k] = vel[k];
+// 			}
+// 		    d[0] = densityValuefloat;
+// 		}
+// 	}
 
-    Partio::write(file.c_str(), *parts);
-    parts->release();
-}
+//     Partio::write(file.c_str(), *parts);
+//     parts->release();
+// }
 
-void KaminoSolver::write_particles_bgeo(const std::string& s, const int frame)
-{
-    std::string file = s + std::to_string(frame) + ".bgeo";
-    std::cout << "Writing to: " << file << std::endl;
+// void KaminoSolver::write_particles_bgeo(const std::string& s, const int frame)
+// {
+//     std::string file = s + std::to_string(frame) + ".bgeo";
+//     std::cout << "Writing to: " << file << std::endl;
 
-    Partio::ParticlesDataMutable* parts = Partio::create();
-    Partio::ParticleAttribute pH, vH, colorVal;
-    pH = parts->addAttribute("position", Partio::VECTOR, 3);
-    vH = parts->addAttribute("v", Partio::VECTOR, 3);
-    colorVal = parts->addAttribute("color", Partio::VECTOR, 3);
+//     Partio::ParticlesDataMutable* parts = Partio::create();
+//     Partio::ParticleAttribute pH, vH, colorVal;
+//     pH = parts->addAttribute("position", Partio::VECTOR, 3);
+//     vH = parts->addAttribute("v", Partio::VECTOR, 3);
+//     colorVal = parts->addAttribute("color", Partio::VECTOR, 3);
 
-    vec3 pos;
-    vec3 vel;
-    vec3 col;
+//     vec3 pos;
+//     vec3 vel;
+//     vec3 col;
 
-    this->particles->copyBack2CPU();
+//     this->particles->copyBack2CPU();
 
-    for (size_t i = 0; i < particles->numOfParticles; ++i)
-	{
-	    pos = vec3(particles->coordCPUBuffer[2 * i],
-		       particles->coordCPUBuffer[2 * i + 1], 0.0);
-	    mapPToSphere(pos);
+//     for (size_t i = 0; i < particles->numOfParticles; ++i)
+// 	{
+// 	    pos = vec3(particles->coordCPUBuffer[2 * i],
+// 		       particles->coordCPUBuffer[2 * i + 1], 0.0);
+// 	    mapPToSphere(pos);
 
-	    col = vec3(particles->colorBGR[3 * i + 1],
-		       particles->colorBGR[3 * i + 2],
-		       particles->colorBGR[3 * i + 3]);
+// 	    col = vec3(particles->colorBGR[3 * i + 1],
+// 		       particles->colorBGR[3 * i + 2],
+// 		       particles->colorBGR[3 * i + 3]);
 
-	    int idx = parts->addParticle();
-	    float* p = parts->dataWrite<float>(pH, idx);
-	    float* v = parts->dataWrite<float>(vH, idx);
-	    float* c = parts->dataWrite<float>(colorVal, idx);
+// 	    int idx = parts->addParticle();
+// 	    float* p = parts->dataWrite<float>(pH, idx);
+// 	    float* v = parts->dataWrite<float>(vH, idx);
+// 	    float* c = parts->dataWrite<float>(colorVal, idx);
 	
-	    for (int k = 0; k < 3; ++k)
-		{
-		    p[k] = pos[k];
-		    v[k] = 0.0;
-		    c[k] = col[k];
-		}
-	}
+// 	    for (int k = 0; k < 3; ++k)
+// 		{
+// 		    p[k] = pos[k];
+// 		    v[k] = 0.0;
+// 		    c[k] = col[k];
+// 		}
+// 	}
 
-    Partio::write(file.c_str(), *parts);
-    parts->release();
-}
+//     Partio::write(file.c_str(), *parts);
+//     parts->release();
+// }
 
 void KaminoSolver::mapPToSphere(vec3& pos) const
 {
