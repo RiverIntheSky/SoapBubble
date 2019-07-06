@@ -18,7 +18,7 @@ static __constant__ fReal DsGlobal;
 static __constant__ fReal CrGlobal;
 static __constant__ fReal UGlobal;
 
-__device__ bool validateCoord(fReal& phi, fReal& theta, bool warning) {
+__device__ bool validateCoord(fReal& phi, fReal& theta) {
     bool ret = false;
     // assume theta lies not too far away from the interval [0, nThetaGlobal],
     // otherwise is the step size too large;
@@ -34,7 +34,7 @@ __device__ bool validateCoord(fReal& phi, fReal& theta, bool warning) {
     	phi += nThetaGlobal;
     	ret = !ret;
     }
-    if (warning && theta > nThetaGlobal || theta < 0)
+    if (theta > nThetaGlobal || theta < 0)
 	printf("Warning: step size too large! theta = %f\n", theta);
     phi = fmod(phi + nPhiGlobal, (fReal)nPhiGlobal);
     return ret;
@@ -50,7 +50,7 @@ __device__ fReal sampleVPhi(fReal* input, fReal phiRawId, fReal thetaRawId, size
     fReal theta = thetaRawId - vPhiThetaOffset;
     // Phi and Theta are now shifted back to origin
 
-    bool isFlippedPole = validateCoord(phi, theta, true);
+    bool isFlippedPole = validateCoord(phi, theta);
 
     int phiIndex = static_cast<int>(floorf(phi));
     int thetaIndex = static_cast<int>(floorf(theta));
@@ -117,7 +117,7 @@ __device__ fReal sampleVTheta(fReal* input, fReal phiRawId, fReal thetaRawId, si
     fReal theta = thetaRawId - vThetaThetaOffset;
     // Phi and Theta are now shifted back to origin
 
-    bool isFlippedPole = validateCoord(phi, theta, true);
+    bool isFlippedPole = validateCoord(phi, theta);
 
     int phiIndex = static_cast<int>(floorf(phi));
     int thetaIndex = static_cast<int>(floorf(theta));
@@ -189,7 +189,7 @@ __device__ fReal sampleCentered(fReal* input, fReal phiRawId, fReal thetaRawId, 
 
     // if (thetaRawId > nThetaGlobal)
     // 	printf("theta %f\n", theta);
-    bool isFlippedPole = validateCoord(phi, theta, true);
+    bool isFlippedPole = validateCoord(phi, theta);
 
     int phiIndex = static_cast<int>(floorf(phi));
     int thetaIndex = static_cast<int>(floorf(theta));
@@ -484,20 +484,23 @@ __global__ void advectionParticles(fReal* output, fReal* velPhi, fReal* velTheta
     int particleId = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (particleId < numOfParticles) {
-	fReal posPhi = input[2 * particleId];
-	fReal posTheta = input[2 * particleId + 1];
+	fReal phiId = input[2 * particleId];
+	fReal thetaId = input[2 * particleId + 1];
+	fReal gTheta = thetaId * gridLenGlobal;
 
-	fReal uPhi = sampleVPhi(velPhi, posPhi * invGridLenGlobal, posTheta * invGridLenGlobal, nPitch);
-	fReal uTheta = sampleVTheta(velTheta, posPhi * invGridLenGlobal, posTheta * invGridLenGlobal, nPitch);
+	fReal uPhi = sampleVPhi(velPhi, phiId, thetaId, nPitch);
+	fReal uTheta = sampleVTheta(velTheta, phiId, thetaId, nPitch);
     
-	fReal cofTheta = timeStepGlobal * invRadiusGlobal;
-	fReal cofPhi = cofTheta / sinf(posTheta);
+	fReal cofTheta = timeStepGlobal * invRadiusGlobal * invGridLenGlobal;
+	fReal cofPhi = cofTheta / sinf(gTheta);
 
-	fReal updatedTheta = posTheta + uTheta * cofTheta;
-	fReal updatedPhi = posPhi + uPhi * cofPhi;
+	fReal updatedThetaId = thetaId + uTheta * cofTheta;
+	fReal updatedPhiId = phiId + uPhi * cofPhi;
 
-	output[2 * particleId] = updatedPhi;
-	output[2 * particleId + 1] = updatedTheta;
+	validateCoord(updatedPhiId, updatedThetaId);
+	
+	output[2 * particleId] = updatedPhiId;
+	output[2 * particleId + 1] = updatedThetaId;
     }
 }
 
@@ -517,14 +520,12 @@ void KaminoSolver::advection()
     advectionVPhiKernel<<<gridLayout, blockLayout>>>
     	(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velPhi->getNextStepPitchInElements());    
     checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
 
     // Advect Theta
     determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
     advectionVThetaKernel<<<gridLayout, blockLayout>>>
     	(velTheta->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velTheta->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
 
     // Advect thickness particles
     determineLayout(gridLayout, blockLayout, 1, particles->numOfParticles);
@@ -532,7 +533,6 @@ void KaminoSolver::advection()
 	(particles->coordGPUNextStep, velPhi->getGPUThisStep(), velTheta->getGPUThisStep(),
 	 particles->coordGPUThisStep, velPhi->getNextStepPitchInElements(), particles->numOfParticles);
     checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
 
     // Advect concentration
     determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
@@ -1270,6 +1270,20 @@ __global__ void applyforcevelphiKernel
 //     thicknessOutput[thetaId * pitch + phiId] = delta / (1 + timeStepGlobal * f);
 // }
 
+__global__ void applyforceParticles
+(fReal* value, fReal* coord, fReal* div, size_t numOfParticles) {
+    int particleId = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (particleId < numOfParticles) {
+	fReal phiId = coord[2 * particleId];
+	fReal thetaId = coord[2 * particleId + 1];
+
+	fReal f = sampleCentered(div, phiId, thetaId, nPhiGlobal);
+
+	value[particleId] = value[particleId] / (1 + timeStepGlobal * f);
+    }
+}
+
 
 __global__ void resetThickness(fReal* thickness, fReal* weight, size_t pitch) {
 // Index
@@ -1292,13 +1306,11 @@ __global__ void mapParticlesToThickness
     int max = index & 1;	 // (index % 2)
 
     if (particleId < numParticles) {
-	fReal gPhi = particleCoord[2 * particleId];
-	fReal gTheta = particleCoord[2 * particleId + 1];
+	fReal gPhiId = particleCoord[2 * particleId];
+	fReal gThetaId = particleCoord[2 * particleId + 1];
 
-	fReal gThetaId = gTheta * invGridLenGlobal;
-	fReal gPhiId = gPhi * invGridLenGlobal;
-
- 	validateCoord(gPhiId, gThetaId, false);
+	fReal gTheta = gThetaId * gridLenGlobal;
+	fReal gPhi = gPhiId * gridLenGlobal;
 
 	size_t thetaId;
 	
@@ -1306,13 +1318,13 @@ __global__ void mapParticlesToThickness
 	    if (gThetaId > nThetaGlobal - 1.5) {
 		thetaId = nThetaGlobal - 1;
 	    } else {
-		thetaId = size_t(floorf(gThetaId + 0.5));
+		thetaId = static_cast<size_t>(floorf(gThetaId + 0.5));
 	    }
 	} else {
 	    if (gThetaId < 1.5) {
 		thetaId = 0;
 	    } else {
-		thetaId = size_t(ceilf(gThetaId - 1.5));
+		thetaId = static_cast<size_t>(ceilf(gThetaId - 1.5));
 	    }
 	} 
 
@@ -1320,8 +1332,9 @@ __global__ void mapParticlesToThickness
 
 	fReal theta = (thetaId + 0.5) * gridLenGlobal;
 
-	int minPhiId = int(ceilf(gPhiId - 1/sinf(theta)));
-	int maxPhiId = int(floorf(gPhiId + 1/sinf(theta)));
+	fReal phiRange = 1/sinf(theta);
+	int minPhiId = static_cast<int>(ceilf(gPhiId - phiRange));
+	int maxPhiId = static_cast<int>(floorf(gPhiId + phiRange));
 
 	fReal z2 = cosf(theta);
 	fReal r = sinf(theta);
@@ -1335,10 +1348,10 @@ __global__ void mapParticlesToThickness
 	    fReal cross_y = z1 * x2 - z2 * x1;
 	    fReal cross_z = x1 * y2 - x2 * y1;
     
-	    fReal dist = atanf(sqrt(cross_x * cross_x + cross_y * cross_y + cross_z * cross_z)) * invGridLenGlobal;
+	    fReal dist = atanf(__fsqrt_rn(cross_x * cross_x + cross_y * cross_y + cross_z * cross_z)) * invGridLenGlobal;
 
 	    if (dist <= 1.) {
-		fReal w = exp(-0.5*dist*dist);
+		fReal w = expf(-0.5*exp2(dist));
 		size_t normalizedPhiId = (phiId + nPhiGlobal) % nPhiGlobal;
 		atomicAdd(weight + thetaId * nPhiGlobal + normalizedPhiId, w);
 		atomicAdd(thicknessOutput + thetaId * pitch + normalizedPhiId, value * w);
@@ -1358,13 +1371,9 @@ __global__ void normalizeThickness
     int thetaId = blockIdx.x / splitVal;
 
     fReal w = weight[thetaId * nPhiGlobal + phiId];
-    fReal advectedVal;
-    //if (0) {
-    if (w > 0) {
-	fReal before = 	thicknessOutput[thetaId * pitch + phiId];
-	fReal after = before / w;
-	advectedVal = thicknessOutput[thetaId * pitch + phiId] / w;
 
+    if (w > 0) {
+	thicknessOutput[thetaId * pitch + phiId] = thicknessOutput[thetaId * pitch + phiId] / w;
     } else {
 	fReal gPhiId = (fReal)phiId + centeredPhiOffset;
 	fReal gThetaId = (fReal)thetaId + centeredThetaOffset;
@@ -1395,10 +1404,10 @@ __global__ void normalizeThickness
 	fReal pPhiId = gPhiId - deltaPhi;
 	fReal pThetaId = gThetaId - deltaTheta;
 
-        advectedVal = sampleCentered(thicknessInput, pPhiId, pThetaId, pitch);
+        fReal advectedVal = sampleCentered(thicknessInput, pPhiId, pThetaId, pitch);
+	fReal f = div[thetaId * nPhiGlobal + phiId];
+	thicknessOutput[thetaId * pitch + phiId] = advectedVal / (1 + timeStepGlobal * f);
     }
-    fReal f = div[thetaId * nPhiGlobal + phiId];
-    thicknessOutput[thetaId * pitch + phiId] = advectedVal / (1 + timeStepGlobal * f);
 }
 
 
@@ -1455,11 +1464,11 @@ void KaminoSolver::bodyforce()
     // checkCudaErrors(cudaGetLastError());
     // checkCudaErrors(cudaDeviceSynchronize());
     
-    // determineLayout(gridLayout, blockLayout, 1, particles->numOfParticles);
-    // applyforceParticles<<<gridLayout, blockLayout>>>
-    // 	(particles->value, particles->coordGPUThisStep, div, particles->numOfParticles);
-    // checkCudaErrors(cudaGetLastError());
-    // checkCudaErrors(cudaDeviceSynchronize());
+    determineLayout(gridLayout, blockLayout, 1, particles->numOfParticles);
+    applyforceParticles<<<gridLayout, blockLayout>>>
+    	(particles->value, particles->coordGPUThisStep, div, particles->numOfParticles);
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
 
     determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
     resetThickness<<<gridLayout, blockLayout>>>
@@ -1841,7 +1850,7 @@ void Kamino::run()
 	checkCudaErrors(cudaMemcpyToSymbol(currentTimeGlobal, &T, sizeof(fReal)));
 	std::cout << "current time " << T << std::endl;
 	solver.adjustStepSize(dt, U, epsilon);
-	dt = 0.000002;
+	dt = 0.000001;
 
 	checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &dt, sizeof(fReal)));
 	std::cout << "current time step size is " << dt << " s" << std::endl;

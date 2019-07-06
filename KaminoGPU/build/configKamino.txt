@@ -6,7 +6,7 @@ Gammam 0.000001
 T 298.15
 Ds 0.01
 rm 0.000000005
-numberOfGridsInTheta 64
+numberOfGridsInTheta 128
 timePerStep 0.0000005
 timePerFrame 0.02
 frameNumbers 100
@@ -18,4 +18,4 @@ E 1
 thicknessSave test/frame
 velocitySave test/vel
 thicknessInit ../init/thickness.ppm
-particleDensity 32
+particleDensity 16

@@ -13,10 +13,10 @@ static __constant__ fReal gridLenGlobal;
 
 __global__ void initParticleValues(fReal* particleVal, fReal* particleCoord, fReal* thickness, size_t pitch) {
     int particleId = blockIdx.x * blockDim.x + threadIdx.x;
-    fReal phi = particleCoord[2 * particleId];
-    fReal theta = particleCoord[2 * particleId + 1];
+    fReal phiId = particleCoord[2 * particleId];
+    fReal thetaId = particleCoord[2 * particleId + 1];
 
-    particleVal[particleId] = sampleCentered(thickness, phi * invGridLenGlobal, theta * invGridLenGlobal, pitch);
+    particleVal[particleId] = sampleCentered(thickness, phiId, thetaId, pitch);
 }
 
 KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
