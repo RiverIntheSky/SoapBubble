@@ -495,7 +495,9 @@ __global__ void advectionParticles(fReal* output, fReal* velPhi, fReal* velTheta
 	fReal cofPhi = cofTheta / sinf(gTheta);
 
 	fReal updatedThetaId = thetaId + uTheta * cofTheta;
-	fReal updatedPhiId = phiId + uPhi * cofPhi;
+	fReal updatedPhiId = phiId;
+	if (sinf(gTheta) > 1e-3f)
+	    updatedPhiId = phiId + uPhi * cofPhi;
 
 	validateCoord(updatedPhiId, updatedThetaId);
 	
@@ -581,7 +583,7 @@ __device__ fReal root3(double x)
 	return 0.0;
 }
 
-#define eps 1e-12f
+#define eps 1e-7f
 
 __device__ fReal solveCubic(fReal a, fReal b, fReal c)
 {
@@ -629,8 +631,9 @@ __global__ void geometricFillKernel
     int gridPhiId = threadIdx.x + threadSequence * blockDim.x;
     int gridThetaId = blockIdx.x / splitVal;
     // Coord in phi-theta space
-    fReal gPhi = ((fReal)gridPhiId + centeredPhiOffset) * gridLenGlobal;
-    fReal gTheta = ((fReal)gridThetaId + centeredThetaOffset) * gridLenGlobal;
+    fReal gPhiId = (fReal)gridPhiId + centeredPhiOffset;
+    fReal gThetaId = (fReal)gridThetaId + centeredThetaOffset;
+    fReal gTheta = gThetaId * gridLenGlobal;
     // The factor
 
     size_t phiLeft = gridPhiId;
@@ -638,7 +641,7 @@ __global__ void geometricFillKernel
     // u = velPhi
     fReal uPrev = 0.5 * (velPhiInput[phiLeft + nPitchInElements * gridThetaId]
 			 + velPhiInput[phiRight + nPitchInElements * gridThetaId]);
-    fReal guPhi = sampleVPhi(velPhiInput, gPhi, gTheta, nPitchInElements);
+    fReal guPhi = sampleVPhi(velPhiInput, gPhiId, gThetaId, nPitchInElements);
 
     // v = velTheta	
     fReal vPrev;
@@ -646,13 +649,13 @@ __global__ void geometricFillKernel
 	{
 	    size_t oppositePhiIdx = (gridPhiId + nPhiGlobal / 2) % nPhiGlobal;
 	    vPrev = 0.75 * velThetaInput[gridPhiId]
-		+ 0.25 * velThetaInput[oppositePhiIdx];
+		- 0.25 * velThetaInput[oppositePhiIdx];
 	}
     else if (gridThetaId == nThetaGlobal - 1)
 	{
 	    size_t oppositePhiIdx = (gridPhiId + nPhiGlobal / 2) % nPhiGlobal;
 	    vPrev = 0.75 * velThetaInput[gridPhiId + nPitchInElements * (gridThetaId - 1)]
-		+ 0.25 * velThetaInput[oppositePhiIdx + nPitchInElements * (gridThetaId - 1)];
+		- 0.25 * velThetaInput[oppositePhiIdx + nPitchInElements * (gridThetaId - 1)];
 	}
     else
 	{
@@ -662,7 +665,7 @@ __global__ void geometricFillKernel
 
 	
 
-    fReal G = timeStepGlobal * cosf(gTheta) / (radiusGlobal * sinf(gTheta));
+    fReal G = timeStepGlobal * cosf(gTheta) * invRadiusGlobal / sinf(gTheta);
     fReal uNext;
     if (abs(G) > eps)
 	{
@@ -739,8 +742,6 @@ void KaminoSolver::geometric()
     assignPhiKernel<<<gridLayout, blockLayout>>>
 	(velPhi->getGPUNextStep(), pressure->getGPUThisStep(), velPhi->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
-
 
 
     determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
@@ -1302,19 +1303,23 @@ __global__ void mapParticlesToThickness
 {
     // Index
     int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int particleId = index >> 1; // (index / 2)
-    int max = index & 1;	 // (index % 2)
+    int particleId = index >> 2; // (index / 4)
+    int partition = index & 3;	 // (index % 4)
 
     if (particleId < numParticles) {
 	fReal gPhiId = particleCoord[2 * particleId];
 	fReal gThetaId = particleCoord[2 * particleId + 1];
 
 	fReal gTheta = gThetaId * gridLenGlobal;
+
+	fReal sinTheta = sinf(gTheta);
+	if (sinTheta < 1e-3f)
+	    return;
 	fReal gPhi = gPhiId * gridLenGlobal;
 
 	size_t thetaId;
 	
-	if (max) {
+	if (partition & 1 == 0) {
 	    if (gThetaId > nThetaGlobal - 1.5) {
 		thetaId = nThetaGlobal - 1;
 	    } else {
@@ -1328,11 +1333,11 @@ __global__ void mapParticlesToThickness
 	    }
 	} 
 
-	fReal x1 = cosf(gPhi) * sinf(gTheta); fReal y1 = sinf(gPhi) * sinf(gTheta); fReal z1 = cosf(gTheta);
+	fReal x1 = cosf(gPhi) * sinTheta; fReal y1 = sinf(gPhi) * sinTheta; fReal z1 = cosf(gTheta);
 
 	fReal theta = (thetaId + 0.5) * gridLenGlobal;
 
-	fReal phiRange = 1/sinf(theta);
+	fReal phiRange = 1./sinf(theta);
 	int minPhiId = static_cast<int>(ceilf(gPhiId - phiRange));
 	int maxPhiId = static_cast<int>(floorf(gPhiId + phiRange));
 
@@ -1340,7 +1345,15 @@ __global__ void mapParticlesToThickness
 	fReal r = sinf(theta);
 	fReal value = particleVal[particleId];
 
-	for (int phiId = minPhiId; phiId <= maxPhiId; phiId++) {
+	int begin; int end;
+	if (partition < 2) {
+	    begin = minPhiId; end = static_cast<int>(gPhiId);
+	} else {
+	    begin = static_cast<int>(gPhiId); end = maxPhiId + 1;
+	}
+	    
+
+	for (int phiId = begin; phiId < end; phiId++) {
 	    fReal phi = phiId * gridLenGlobal;
 	    fReal x2 = cosf(phi) * r; fReal y2 = sinf(phi) * r;
 
@@ -1350,7 +1363,7 @@ __global__ void mapParticlesToThickness
     
 	    fReal dist = atanf(__fsqrt_rn(cross_x * cross_x + cross_y * cross_y + cross_z * cross_z)) * invGridLenGlobal;
 
-	    if (dist <= 1.) {
+	    if (dist <= 1.f) {
 		fReal w = expf(-0.5*exp2(dist));
 		size_t normalizedPhiId = (phiId + nPhiGlobal) % nPhiGlobal;
 		atomicAdd(weight + thetaId * nPhiGlobal + normalizedPhiId, w);
@@ -1375,6 +1388,7 @@ __global__ void normalizeThickness
     if (w > 0) {
 	thicknessOutput[thetaId * pitch + phiId] = thicknessOutput[thetaId * pitch + phiId] / w;
     } else {
+	//	printf("Warning: no particles contributed to grid thetaId %d, phiId %d\n", thetaId, phiId);
 	fReal gPhiId = (fReal)phiId + centeredPhiOffset;
 	fReal gThetaId = (fReal)thetaId + centeredThetaOffset;
 	fReal gTheta = gThetaId * gridLenGlobal;
@@ -1472,23 +1486,16 @@ void KaminoSolver::bodyforce()
 
     determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
     resetThickness<<<gridLayout, blockLayout>>>
-	(thickness->getGPUNextStep(), weight, thickness->getNextStepPitchInElements());
+    	(thickness->getGPUNextStep(), weight, thickness->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
     
-    determineLayout(gridLayout, blockLayout, 2, particles->numOfParticles);
+    determineLayout(gridLayout, blockLayout, 4, particles->numOfParticles);
     mapParticlesToThickness<<<gridLayout, blockLayout>>>
     	(thickness->getGPUNextStep(), particles->coordGPUThisStep, particles->value,
-	 thickness->getNextStepPitchInElements(), weight, particles->numOfParticles);
+    	 thickness->getNextStepPitchInElements(), weight, particles->numOfParticles);
     checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
     
-    determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
-    normalizeThickness<<<gridLayout, blockLayout>>>
-	(thickness->getGPUNextStep(), thickness->getGPUThisStep(), velPhi->getGPUNextStep(),
-	 velTheta->getGPUNextStep(), div, weight, thickness->getNextStepPitchInElements());
-    checkCudaErrors(cudaGetLastError());
-
     determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
     applyforceSurfConcentration<<<gridLayout, blockLayout>>>
     	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
@@ -1496,36 +1503,43 @@ void KaminoSolver::bodyforce()
 	 surfConcentration->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
 
-    // determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
-    // applyforcevelthetaKernel<<<gridLayout, blockLayout>>>
-    // 	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
-    // 	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(), div,
-    // 	 velTheta->getNextStepPitchInElements());
-    // checkCudaErrors(cudaGetLastError());
-    // checkCudaErrors(cudaDeviceSynchronize());
-
-    // determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
-    // applyforcevelphiKernel<<<gridLayout, blockLayout>>>
-    // 	(velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
-    // 	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(), div,
-    // 	 velPhi->getNextStepPitchInElements());
-    // checkCudaErrors(cudaGetLastError());
-    // checkCudaErrors(cudaDeviceSynchronize());
-
-        determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
-    applyforcevelthetaNoViscosityKernel<<<gridLayout, blockLayout>>>
+    determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
+    applyforcevelthetaKernel<<<gridLayout, blockLayout>>>
     	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
-    	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(),
+    	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(), div,
     	 velTheta->getNextStepPitchInElements());
+    checkCudaErrors(cudaDeviceSynchronize());   
+    checkCudaErrors(cudaDeviceSynchronize());
+    
+    determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
+    normalizeThickness<<<gridLayout, blockLayout>>>
+	(thickness->getGPUNextStep(), thickness->getGPUThisStep(), velPhi->getGPUNextStep(),
+	 velTheta->getGPUNextStep(), div, weight, thickness->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
+    
 
     determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
-    applyforcevelphiNoViscosityKernel<<<gridLayout, blockLayout>>>
+    applyforcevelphiKernel<<<gridLayout, blockLayout>>>
     	(velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
-    	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(),
+    	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(), div,
     	 velPhi->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
+
+    //     determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
+    // applyforcevelthetaNoViscosityKernel<<<gridLayout, blockLayout>>>
+    // 	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
+    // 	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(),
+    // 	 velTheta->getNextStepPitchInElements());
+    // checkCudaErrors(cudaGetLastError());
+
+    // determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
+    // applyforcevelphiNoViscosityKernel<<<gridLayout, blockLayout>>>
+    // 	(velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
+    // 	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(),
+    // 	 velPhi->getNextStepPitchInElements());
+    // checkCudaErrors(cudaGetLastError());
+    // checkCudaErrors(cudaDeviceSynchronize());
     
     thickness->swapGPUBuffer();
     surfConcentration->swapGPUBuffer();

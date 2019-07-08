@@ -25,7 +25,7 @@ include_directories(/opt/cuda/samples/common/inc)
 link_directories(/opt/cuda/lib64)
 set(CUDA_SEPARABLE_COMPILATION ON)
 
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-use_fast_math -gencode arch=compute_61,code=sm_61;)
+set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-g -G -use_fast_math -gencode arch=compute_61,code=sm_61;)
 message("arch=61")
 
 option(BUILD_TESTS "Build the tests" ON)
