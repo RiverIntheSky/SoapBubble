@@ -31,7 +31,7 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 
     cudaDeviceProp deviceProp;
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, 0));
-    this->nThreadxMax = deviceProp.maxThreadsDim[0];
+    this->nThreadxMax = min(deviceProp.maxThreadsDim[0], 512);
 
     checkCudaErrors(cudaMalloc((void **)&gpuUFourier,
 			       sizeof(ComplexFourier) * nPhi * nTheta));
@@ -52,7 +52,7 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     checkCudaErrors(cudaMalloc((void **)(&div),
 			       sizeof(fReal) * nPhi * nTheta));
     checkCudaErrors(cudaMalloc((void **)(&weight),
-			       sizeof(fReal) * nPhi * nTheta));
+			       sizeof(fReal) * nPhi * nTheta * 2));
 
     checkCudaErrors(cudaMalloc((void **)(&gpuA),
 			       sizeof(fReal) * nPhi * nTheta));
@@ -306,10 +306,12 @@ void KaminoSolver::adjustStepSize(fReal& dt, const fReal& U, const fReal& epsilo
 	// std::cout << "dt " << dt << std::endl;
 	optTimeStep = dt * std::sqrt(epsilon* (m*m-1)/maxError);
 	std::cout << "opt " << optTimeStep << std::endl;
+		
+	//optTimeStep = max(optTimeStep, 1e-7);
 
 	if ((optTimeStep > 2 * dt || dt > 2 * optTimeStep) && loop < 2) {
 	    loop++;
-	    dt = sqrt(dt * optTimeStep);	
+	    dt = optTimeStep;	
 	} else {
 	    dt = optTimeStep;
 	    break;
