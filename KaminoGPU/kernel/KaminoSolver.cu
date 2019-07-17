@@ -31,7 +31,7 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 
     cudaDeviceProp deviceProp;
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, 0));
-    this->nThreadxMax = min(deviceProp.maxThreadsDim[0], 512);
+    this->nThreadxMax = min(deviceProp.maxThreadsDim[0], 128);
 
     checkCudaErrors(cudaMalloc((void **)&gpuUFourier,
 			       sizeof(ComplexFourier) * nPhi * nTheta));
@@ -52,7 +52,7 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     checkCudaErrors(cudaMalloc((void **)(&div),
 			       sizeof(fReal) * nPhi * nTheta));
     checkCudaErrors(cudaMalloc((void **)(&weight),
-			       sizeof(fReal) * nPhi * nTheta * 2));
+			       sizeof(float2) * nPhi * nTheta));
 
     checkCudaErrors(cudaMalloc((void **)(&gpuA),
 			       sizeof(fReal) * nPhi * nTheta));

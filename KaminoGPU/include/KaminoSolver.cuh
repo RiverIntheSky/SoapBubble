@@ -30,7 +30,7 @@ private:
     
     // Buffer for elements that can be precomputed
     fReal* div;
-    fReal* weight;
+    float2* weight;
 
     /// Precompute these!
     // nPhi by nTheta elements, but they should be retrieved by shared memories
