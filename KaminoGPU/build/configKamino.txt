@@ -17,5 +17,5 @@ D 1
 E 1
 thicknessSave test/frame
 velocitySave test/vel
-thicknessInit ../init/thickness.ppm
-particleDensity 16
+thicknessInit ../init/thickness.exr
+particleDensity 8

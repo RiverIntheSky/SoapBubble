@@ -395,7 +395,7 @@ void KaminoSolver::initThicknessfromPic(std::string path, size_t particleDensity
 	    return;
 	}
     cv::Mat image_In, image_Flipped;
-    image_In = cv::imread(path, cv::IMREAD_COLOR);
+    image_In = cv::imread(path, cv::IMREAD_UNCHANGED);
     std::cout << path << std::endl;
     if (!image_In.data)
 	{
@@ -412,8 +412,8 @@ void KaminoSolver::initThicknessfromPic(std::string path, size_t particleDensity
 	{
 	    for (size_t j = 0; j < nTheta; ++j)
 		{
-		    cv::Point3_<uchar>* p = image_Resized.ptr<cv::Point3_<uchar>>(j, i);
-		    fReal C = p->x / 255.0; // B
+		    cv::Point3_<float>* p = image_Resized.ptr<cv::Point3_<float>>(j, i);
+		    fReal C = p->x; // Gray scale
 		    this->thickness->setCPUValueAt(i, j, C);
 		}
 	}
