@@ -1328,8 +1328,8 @@ __global__ void mapParticlesToThickness
 	    fReal phi = phiId * gridLenGlobal;
 	    fReal x2 = cosf(phi) * r; fReal y2 = sinf(phi) * r;
 
-	    fReal dist2 = exp2(x1 - x2) + exp2(y1 - y2) + exp2(z1 - z2);
-    
+	    fReal dist2 = powf(fabsf(x1 - x2), 2.f) + powf(fabsf(y1 - y2), 2.f) + powf(fabsf(z1 - z2), 2.f);
+	        
 	    if (dist2 <= .25f) {
 		fReal w = expf(-10*dist2);
 		size_t normalizedPhiId = (phiId + nPhiGlobal) % nPhiGlobal;
