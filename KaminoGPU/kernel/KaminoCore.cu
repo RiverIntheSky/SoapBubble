@@ -1425,9 +1425,9 @@ __global__ void applyforceSurfConcentration
     // fReal laplace = invGridLenGlobal * invGridLenGlobal *
     // 	(gammaWest - 4*gamma + gammaEast + gammaNorth + gammaSouth);
     
-    fReal f = div[thetaId * nPhiGlobal + phiId] * gamma;
+    fReal f = div[thetaId * nPhiGlobal + phiId];
     // fReal f2 = DsGlobal * laplace;
-    sConcentrationOutput[thetaId * pitch + phiId] = gamma / (1 + timeStepGlobal * f);
+    sConcentrationOutput[thetaId * pitch + phiId] = max(gamma / (1 + timeStepGlobal * f), 0.f);
 }
 
 
