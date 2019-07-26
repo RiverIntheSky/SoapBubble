@@ -18,25 +18,25 @@ static __constant__ fReal DsGlobal;
 static __constant__ fReal CrGlobal;
 static __constant__ fReal UGlobal;
 
-__device__ bool validateCoord(fReal& phi, fReal& theta) {
+__device__ bool validateCoord(fReal& phi, fReal& theta, size_t& nPhi) {
     bool ret = false;
     // assume theta lies not too far away from the interval [0, nThetaGlobal],
     // otherwise is the step size too large;
-    // TODO: are theta = 0 and theta = nThetaGlobal both ok?
-    // should it be warped?
-    if (theta >= nThetaGlobal) {
-	theta = nPhiGlobal - theta;
-	phi += nThetaGlobal;
+    size_t nTheta = nPhi / 2;
+
+    if (theta >= nTheta) {
+	theta = nPhi - theta;
+	phi += nTheta;
     	ret = !ret;
     }
     if (theta < 0) {
     	theta = -theta;
-    	phi += nThetaGlobal;
+    	phi += nTheta;
     	ret = !ret;
     }
-    if (theta > nThetaGlobal || theta < 0)
+    if (theta > nTheta || theta < 0)
 	printf("Warning: step size too large! theta = %f\n", theta);
-    phi = fmod(phi + nPhiGlobal, (fReal)nPhiGlobal);
+    phi = fmod(phi + nPhi, (fReal)nPhi);
     return ret;
 }
 
@@ -50,7 +50,7 @@ __device__ fReal sampleVPhi(fReal* input, fReal phiRawId, fReal thetaRawId, size
     fReal theta = thetaRawId - vPhiThetaOffset;
     // Phi and Theta are now shifted back to origin
 
-    bool isFlippedPole = validateCoord(phi, theta);
+    bool isFlippedPole = validateCoord(phi, theta, nPhiGlobal);
 
     int phiIndex = static_cast<int>(floorf(phi));
     int thetaIndex = static_cast<int>(floorf(theta));
@@ -117,7 +117,7 @@ __device__ fReal sampleVTheta(fReal* input, fReal phiRawId, fReal thetaRawId, si
     fReal theta = thetaRawId - vThetaThetaOffset;
     // Phi and Theta are now shifted back to origin
 
-    bool isFlippedPole = validateCoord(phi, theta);
+    bool isFlippedPole = validateCoord(phi, theta, nPhiGlobal);
 
     int phiIndex = static_cast<int>(floorf(phi));
     int thetaIndex = static_cast<int>(floorf(theta));
@@ -189,7 +189,8 @@ __device__ fReal sampleCentered(fReal* input, fReal phiRawId, fReal thetaRawId, 
 
     // if (thetaRawId > nThetaGlobal)
     // 	printf("theta %f\n", theta);
-    bool isFlippedPole = validateCoord(phi, theta);
+    // TODO change for particles
+    bool isFlippedPole = validateCoord(phi, theta, pitch);
 
     int phiIndex = static_cast<int>(floorf(phi));
     int thetaIndex = static_cast<int>(floorf(theta));
@@ -486,7 +487,7 @@ __global__ void advectionParticles(fReal* output, fReal* velPhi, fReal* velTheta
 	if (sinTheta < 1e-5f)
 	    updatedPhiId = phiId;
 
-	validateCoord(updatedPhiId, updatedThetaId);
+	validateCoord(updatedPhiId, updatedThetaId, nPhiGlobal);
 	
 	output[2 * particleId] = updatedPhiId;
 	output[2 * particleId + 1] = updatedThetaId;
@@ -628,7 +629,6 @@ __global__ void geometricFillKernel
     // u = velPhi
     fReal uPrev = 0.5 * (velPhiInput[phiLeft + nPitchInElements * gridThetaId]
 			 + velPhiInput[phiRight + nPitchInElements * gridThetaId]);
-    fReal guPhi = sampleVPhi(velPhiInput, gPhiId, gThetaId, nPitchInElements);
 
     // v = velTheta	
     fReal vPrev;
@@ -716,7 +716,6 @@ void KaminoSolver::geometric()
     //intermediate: pressure.this as phi, next as theta
 
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
-    // does this has nothing with pressure to do, but only a place-holder?
     geometricFillKernel<<<gridLayout, blockLayout>>> 
 	(pressure->getGPUThisStep(), pressure->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(),
 	 pressure->getNextStepPitchInElements());
@@ -1456,19 +1455,34 @@ void KaminoSolver::bodyforce()
     	(particles->coordGPUThisStep, particles->value,  weight, particles->numOfParticles);
     checkCudaErrors(cudaGetLastError());
 
-    determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
-    applyforcevelphiKernel<<<gridLayout, blockLayout>>>
-    	(velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
-    	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(), div,
-    	 velPhi->getNextStepPitchInElements());
-    checkCudaErrors(cudaGetLastError());
+    // determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
+    // applyforcevelphiKernel<<<gridLayout, blockLayout>>>
+    // 	(velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
+    // 	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(), div,
+    // 	 velPhi->getNextStepPitchInElements());
+    // checkCudaErrors(cudaGetLastError());
+
+    // determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
+    // applyforcevelthetaKernel<<<gridLayout, blockLayout>>>
+    // 	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
+    // 	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(), div,
+    // 	 velTheta->getNextStepPitchInElements());
+    // checkCudaErrors(cudaGetLastError());
 
     determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
-    applyforcevelthetaKernel<<<gridLayout, blockLayout>>>
+    applyforcevelthetaNoViscosityKernel<<<gridLayout, blockLayout>>>
     	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
-    	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(), div,
+    	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(),
     	 velTheta->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
+
+    determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
+    applyforcevelphiNoViscosityKernel<<<gridLayout, blockLayout>>>
+    	(velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
+    	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(),
+    	 velPhi->getNextStepPitchInElements());
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
 
     determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
     applyforceSurfConcentration<<<gridLayout, blockLayout>>>
@@ -1484,22 +1498,6 @@ void KaminoSolver::bodyforce()
 	 velTheta->getGPUNextStep(), div, weight, thickness->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
-
-
-    //     determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
-    // applyforcevelthetaNoViscosityKernel<<<gridLayout, blockLayout>>>
-    // 	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
-    // 	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(),
-    // 	 velTheta->getNextStepPitchInElements());
-    // checkCudaErrors(cudaGetLastError());
-
-    // determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
-    // applyforcevelphiNoViscosityKernel<<<gridLayout, blockLayout>>>
-    // 	(velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
-    // 	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(),
-    // 	 velPhi->getNextStepPitchInElements());
-    // checkCudaErrors(cudaGetLastError());
-    // checkCudaErrors(cudaDeviceSynchronize());
     
     thickness->swapGPUBuffer();
     surfConcentration->swapGPUBuffer();

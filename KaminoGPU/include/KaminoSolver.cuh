@@ -5,7 +5,10 @@
 
 extern __constant__ fReal invGridLenGlobal;
 
+__device__ bool validateCoord(fReal& phi, fReal& theta, size_t& nPhi);
+__device__ fReal kaminoLerp(fReal from, fReal to, fReal alpha);
 __device__ fReal sampleCentered(fReal* input, fReal phiRawId, fReal thetaRawId, size_t pitch);
+__global__ void resetThickness(float2* weight);
 
 class KaminoSolver
 {
@@ -31,6 +34,13 @@ private:
     // Buffer for elements that can be precomputed
     fReal* div;
     float2* weight;
+
+    // original resolution
+    float2* weightFull;
+    fReal* thicknessFull;
+    fReal* thicknessFullCPU;
+    int cols;
+    int rows;
 
     /// Precompute these!
     // nPhi by nTheta elements, but they should be retrieved by shared memories
