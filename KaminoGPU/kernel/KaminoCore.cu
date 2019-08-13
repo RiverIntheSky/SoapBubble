@@ -470,22 +470,25 @@ __global__ void advectionParticles(fReal* output, fReal* velPhi, fReal* velTheta
 
 # ifdef RUNGE_KUTTA
 	// Traced halfway in phi-theta space
-	fReal midPhiId = phiId - 0.5 * deltaPhi;
-	fReal midThetaId = thetaId - 0.5 * deltaTheta;
-	if (sinTheta < 1e-5f)
-	    midPhiId = phiId;
+	fReal midPhiId = phiId + 0.5 * deltaPhi;
+	fReal midThetaId = thetaId + 0.5 * deltaTheta;
+	if (sinTheta < 1e-7f)
+	   midPhiId = phiId + 0.5 * uPhi * cofTheta / (1e-7f);
 
 	fReal muPhi = sampleVPhi(velPhi, midPhiId, midThetaId, pitch);
 	fReal muTheta = sampleVTheta(velTheta, midPhiId, midThetaId, pitch);
 
 	deltaPhi = muPhi * cofPhi;
 	deltaTheta = muTheta * cofTheta;
+
+	theta = midThetaId * gridLenGlobal;
+	sinTheta = sinf(theta);
 # endif
 
-	fReal updatedThetaId = thetaId + uTheta * cofTheta;
-	fReal updatedPhiId = phiId + uPhi * cofPhi;;
-	if (sinTheta < 1e-5f)
-	    updatedPhiId = phiId;
+	fReal updatedThetaId = thetaId + deltaTheta;
+	fReal updatedPhiId = phiId + deltaPhi;
+	if (sinTheta < 1e-7f)
+	    updatedPhiId = phiId + muPhi * cofTheta / (1e-7f);
 
 	validateCoord(updatedPhiId, updatedThetaId, nPhiGlobal);
 	
