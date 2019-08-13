@@ -12,6 +12,7 @@ public:
     size_t numOfParticles;
 
     fReal* coordCPUBuffer;
+    fReal* tempVal;
     fReal* value;
     fReal* coordGPUThisStep;
     fReal* coordGPUNextStep;

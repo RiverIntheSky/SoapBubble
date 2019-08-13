@@ -20,15 +20,17 @@ KaminoParticles::KaminoParticles(std::string path, size_t particleDensity, fReal
 
     copy2GPU();
     checkCudaErrors(cudaMalloc(&value, sizeof(fReal) * numOfParticles));
+    checkCudaErrors(cudaMalloc(&tempVal, sizeof(fReal) * numOfParticles));
 }
 
 KaminoParticles::~KaminoParticles()
 {
     delete[] coordCPUBuffer;
     delete[] value;
+    delete[] tempVal;
 
     checkCudaErrors(cudaFree(coordGPUThisStep));
-    checkCudaErrors(cudaFree(coordGPUNextStep));
+    checkCudaErrors(cudaFre,e(coordGPUNextStep));
 }
 
 void KaminoParticles::copy2GPU()

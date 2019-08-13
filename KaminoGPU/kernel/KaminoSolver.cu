@@ -659,7 +659,7 @@ __global__ void upsampleParticles
 	fReal gPhi = gPhiId * gridLen;
 
 	fReal sinTheta = sinf(gTheta);
-	if (sinTheta < 1e-5f)
+	if (sinTheta < 1e-7f)
 	    return;
 
 	size_t thetaId = static_cast<size_t>(floorf(gThetaId));
@@ -717,11 +717,38 @@ __global__ void normalizeThickness
     if (w > 0) {
 	thicknessHighRes[thetaId * Cols + phiId] = val / w;
 	// printf("thetaId %d phiId %d\n", thetaId, phiId);
-    } else {
-	fReal gPhiId = ((fReal)phiId + centeredPhiOffset) / Ratio;
-	fReal gThetaId = ((fReal)thetaId + centeredThetaOffset) / Ratio;
-	// printf("gThetaId %f gPhiId %f pitch %d\n", gThetaId, gPhiId, int(pitch));
-	thicknessHighRes[thetaId * Cols + phiId] = sampleCentered(thicknessLowRes, gPhiId, gThetaId, pitch);
+    } 
+    __syncthreads();
+    if (w == 0) {
+    	int neighbors[4];
+    	if (thetaId == 0) {
+    	    neighbors[0] = thetaId * Cols + (phiId + Cols / 2) % Cols;
+    	} else {
+    	    neighbors[0] = (thetaId - 1) * Cols + phiId;
+    	}
+    	if (thetaId == Rows - 1) {
+    	    neighbors[1] = thetaId * Cols + (phiId + Cols / 2) % Cols;
+    	} else {
+    	    neighbors[1] = (thetaId + 1) * Cols + phiId;
+    	}
+    	neighbors[2] = thetaId * Cols + (phiId + 1) % Cols;
+    	neighbors[3] = thetaId * Cols + (phiId - 1 + Cols) % Cols;
+    	fReal valn = 0.f;
+    	int nonZero = 0;
+    	for (int i = 0; i < 4; i++) {
+    	    fReal currentNeighbor = thicknessHighRes[neighbors[i]];
+    	    if (currentNeighbor > 0) {
+    		valn += currentNeighbor;
+    		nonZero++;
+    	    }
+    	}
+    	if (nonZero > 0) {
+    	    thicknessHighRes[thetaId * Cols + phiId] = valn / nonZero;
+    	} else {
+    	fReal gPhiId = ((fReal)phiId + centeredPhiOffset) / Ratio;
+    	fReal gThetaId = ((fReal)thetaId + centeredThetaOffset) / Ratio;
+      	thicknessHighRes[thetaId * Cols + phiId] = sampleCentered(thicknessLowRes, gPhiId, gThetaId, pitch);
+    	}
     }
 }
 
