@@ -4,10 +4,10 @@ U 1
 cm 0.5
 Gammam 0.000001 
 T 298.15
-Ds 0.01
+Ds 0.001
 rm 0.000000005
-numberOfGridsInTheta 64
-timePerStep 0.00001
+numberOfGridsInTheta 128
+timePerStep 0.000005
 timePerFrame 0.004
 frameNumbers 5000
 A 0.0
@@ -15,7 +15,7 @@ B 1
 C 1
 D 1
 E 1
-thicknessSave 3/frame
-velocitySave 3/vel
+thicknessSave 128/frame
+velocitySave 128/vel
 thicknessInit ../init/thickness.exr
-particleDensity 100
+particleDensity 64

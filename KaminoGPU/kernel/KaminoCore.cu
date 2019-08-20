@@ -18,6 +18,8 @@ static __constant__ fReal DsGlobal;
 static __constant__ fReal CrGlobal;
 static __constant__ fReal UGlobal;
 
+#define eps 1e-5f
+
 __device__ bool validateCoord(fReal& phi, fReal& theta, size_t& nPhi) {
     bool ret = false;
     // assume theta lies not too far away from the interval [0, nThetaGlobal],
@@ -457,7 +459,7 @@ __global__ void advectionParticles(fReal* output, fReal* velPhi, fReal* velTheta
 	fReal phiId = input[2 * particleId];
 	fReal thetaId = input[2 * particleId + 1];
 	fReal theta = thetaId * gridLenGlobal;
-	fReal sinTheta = sinf(theta);
+	fReal sinTheta = max(sinf(theta), eps);
 
 	fReal uPhi = sampleVPhi(velPhi, phiId, thetaId, pitch);
 	fReal uTheta = sampleVTheta(velTheta, phiId, thetaId, pitch);
@@ -472,8 +474,6 @@ __global__ void advectionParticles(fReal* output, fReal* velPhi, fReal* velTheta
 	// Traced halfway in phi-theta space
 	fReal midPhiId = phiId + 0.5 * deltaPhi;
 	fReal midThetaId = thetaId + 0.5 * deltaTheta;
-	if (sinTheta < 1e-7f)
-	   midPhiId = phiId + 0.5 * uPhi * cofTheta / (1e-7f);
 
 	fReal muPhi = sampleVPhi(velPhi, midPhiId, midThetaId, pitch);
 	fReal muTheta = sampleVTheta(velTheta, midPhiId, midThetaId, pitch);
@@ -482,13 +482,11 @@ __global__ void advectionParticles(fReal* output, fReal* velPhi, fReal* velTheta
 	deltaTheta = muTheta * cofTheta;
 
 	theta = midThetaId * gridLenGlobal;
-	sinTheta = sinf(theta);
+	sinTheta = max(sinf(theta), eps);
 # endif
 
 	fReal updatedThetaId = thetaId + deltaTheta;
 	fReal updatedPhiId = phiId + deltaPhi;
-	if (sinTheta < 1e-7f)
-	    updatedPhiId = phiId + muPhi * cofTheta / (1e-7f);
 
 	validateCoord(updatedPhiId, updatedThetaId, nPhiGlobal);
 	
@@ -576,8 +574,6 @@ __device__ fReal root3(double x)
     else
 	return 0.0;
 }
-
-#define eps 1e-7f
 
 __device__ fReal solveCubic(fReal a, fReal b, fReal c)
 {
@@ -1313,9 +1309,8 @@ __global__ void mapParticlesToThickness
 
 	fReal gTheta = gThetaId * gridLenGlobal;
 
-	fReal sinTheta = sinf(gTheta);
-	if (sinTheta < 1e-7f)
-	    return;
+	fReal sinTheta = max(sinf(gTheta), eps);
+
 	fReal gPhi = gPhiId * gridLenGlobal;
 
 	size_t thetaId = static_cast<size_t>(floorf(gThetaId));
@@ -1384,7 +1379,8 @@ __global__ void normalizeThickness
 	fReal guTheta = sampleVTheta(velTheta, gPhiId, gThetaId, pitch);
     
 	fReal cofTheta = timeStepGlobal * invRadiusGlobal * invGridLenGlobal;
-	fReal cofPhi = cofTheta / sinf(gTheta);
+	fReal sinTheta = max(sinf(gTheta), eps);
+	fReal cofPhi = cofTheta / sinTheta;
 
 	fReal deltaPhi = guPhi * cofPhi;
 	fReal deltaTheta = guTheta * cofTheta;
@@ -1827,6 +1823,7 @@ Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
     std::cout << "Re^-1 " << re << std::endl;
     std::cout << "S " << S << std::endl;
     std::cout << "Cr " << Cr << std::endl;
+    std::cout << "M " << M << std::endl;
 }
 Kamino::~Kamino()
 {}
