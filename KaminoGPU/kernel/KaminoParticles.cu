@@ -30,7 +30,7 @@ KaminoParticles::~KaminoParticles()
     delete[] tempVal;
 
     checkCudaErrors(cudaFree(coordGPUThisStep));
-    checkCudaErrors(cudaFre,e(coordGPUNextStep));
+    checkCudaErrors(cudaFree(coordGPUNextStep));
 }
 
 void KaminoParticles::copy2GPU()

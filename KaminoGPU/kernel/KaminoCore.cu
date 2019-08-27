@@ -405,22 +405,9 @@ __global__ void advectionAllCentered
     fReal gTheta = gThetaId * gridLenGlobal;
     
     // Sample the speed
-    fReal guPhi = sampleVPhi(velPhi, gPhiId, gThetaId, nPitchInElements);
     fReal guTheta = sampleVTheta(velTheta, gPhiId, gThetaId, nPitchInElements);
-    // fReal guPhi = 0.5 * (velPhi[thetaId * nPitchInElements + phiId] +
-    // 			 velPhi[thetaId * nPitchInElements + (phiId + 1) % nPhiGlobal]);
-    // fReal guTheta;
-    // if (thetaId == 0) {
-    // 	guTheta = 0.75 * velTheta[phiId] -
-    // 	    0.25 * velTheta[(phiId + nPhiGlobal / 2) % nPhiGlobal];
-    // } else if (thetaId == nThetaGlobal - 1) {
-    // 	int thetaIdNorth = thetaId - 1;
-    // 	guTheta = 0.75 * velTheta[thetaIdNorth * nPitchInElements + phiId] -
-    // 	    0.25 * velTheta[thetaIdNorth * nPitchInElements + (phiId + nPhiGlobal / 2) % nPhiGlobal];
-    // } else {
-    // 	guTheta = 0.5 * (velTheta[(thetaId - 1) * nPitchInElements + phiId] +
-    // 			 velTheta[thetaId * nPitchInElements + phiId]);
-    // }
+    fReal guPhi = 0.5 * (velPhi[thetaId * nPitchInElements + phiId] +
+    			 velPhi[thetaId * nPitchInElements + (phiId + 1) % nPhiGlobal]);
 
     fReal cofTheta = timeStepGlobal * invRadiusGlobal * invGridLenGlobal;
     fReal cofPhi = cofTheta / sinf(gTheta);
@@ -511,14 +498,14 @@ void KaminoSolver::advection()
     advectionVPhiKernel<<<gridLayout, blockLayout>>>
     	(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velPhi->getNextStepPitchInElements());    
     checkCudaErrors(cudaGetLastError());
-        checkCudaErrors(cudaDeviceSynchronize());
+    checkCudaErrors(cudaDeviceSynchronize());
 
     // Advect Theta
     determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
     advectionVThetaKernel<<<gridLayout, blockLayout>>>
     	(velTheta->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velTheta->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
-        checkCudaErrors(cudaDeviceSynchronize());
+    checkCudaErrors(cudaDeviceSynchronize());
  
     // Advect thickness particles
     determineLayout(gridLayout, blockLayout, 1, particles->numOfParticles);
@@ -526,7 +513,7 @@ void KaminoSolver::advection()
 	(particles->coordGPUNextStep, velPhi->getGPUThisStep(), velTheta->getGPUThisStep(),
 	 particles->coordGPUThisStep, velPhi->getThisStepPitchInElements(), particles->numOfParticles);
     checkCudaErrors(cudaGetLastError());
-        checkCudaErrors(cudaDeviceSynchronize());
+    checkCudaErrors(cudaDeviceSynchronize());
   
     // Advect concentration
     determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
@@ -849,8 +836,9 @@ __global__ void applyforcevelthetaNoViscosityKernel
 
     fReal vAir = 0.0;
     fReal f6 = vAir - v1;
-    fReal f7 = gGlobal * sinTheta;
-    
+    // fReal f7 = gGlobal * sinTheta;
+    fReal f7 = 0.0;
+
     // output
     velThetaOutput[thetaId * pitch + phiId] = (v1 + timeStepGlobal * (f1 + f3 + CrGlobal * vAir + f7))
 	/ (1.0 + CrGlobal * timeStepGlobal);
@@ -984,16 +972,19 @@ __global__ void applyforcevelthetaKernel
     fReal f4 = reGlobal * invDelta * invRadiusGlobal * pDpy * 2 * (div + invRadiusGlobal * pvpy);
     fReal f5 = reGlobal * invRadiusGlobal * cscTheta * (psspy + pspx - cosTheta * sigma22);
 
-    fReal f7 = gGlobal * sinTheta;
-    // fReal f7 = 0.0; 		// Van der Waals
+    // fReal f7 = gGlobal * sinTheta;
+    fReal f7 = 0.0; 		// Van der Waals
     fReal vAir = 0.0;
     // if (thetaId > nThetaGlobal*0.4375 && thetaId < nThetaGlobal*0.5625)
     // 	vAir = -M_2PI * radiusGlobal * sinf(gPhi) * cotTheta;
     fReal f6 = CrGlobal * (vAir - v1);
     
     // output
-    velThetaOutput[thetaId * pitch + phiId] = (v1 + timeStepGlobal * (f1 + f2 + f3 + f4 + f5 + CrGlobal * vAir + f7))
+    fReal result = (v1 + timeStepGlobal * (f1 + f2 + f3 + f4 + f5 + CrGlobal * vAir + f7))
 	/ (1.0 + CrGlobal * timeStepGlobal);
+    if (fabsf(result) < eps)
+	result = 0.f;
+    velThetaOutput[thetaId * pitch + phiId] = result;
 }
 
 
@@ -1006,6 +997,7 @@ __global__ void applyforcevelphiNoViscosityKernel
     int thetaId = blockIdx.x / splitVal;
 
     // Coord in phi-theta space
+    fReal gPhi = ((fReal)phiId + vPhiPhiOffset) * gridLenGlobal;
     fReal gTheta = ((fReal)thetaId + vPhiThetaOffset) * gridLenGlobal;
 
     int phiWestId = (phiId - 1 + nPhiGlobal) % nPhiGlobal;
@@ -1068,10 +1060,10 @@ __global__ void applyforcevelphiNoViscosityKernel
     fReal f3 = -2 * MGlobal * invDelta * invRadiusGlobal * cscTheta * pGpx;
 
     fReal uAir = 0.0;
-    // if (thetaId > nThetaGlobal*0.375 && thetaId < nThetaGlobal*0.5)
-    // 	uAir = M_2PI * radiusGlobal * cosf(gPhi) * sinTheta / UGlobal;
-    // if (thetaId > nThetaGlobal*0.5 && thetaId < nThetaGlobal*0.625)
-    // 	uAir = -M_2PI * radiusGlobal * cosf(gPhi) * sinTheta / UGlobal;
+    if (thetaId > nThetaGlobal*0.375 && thetaId < nThetaGlobal*0.5 && currentTimeGlobal < 5)
+    	uAir = 0.1*M_PI * radiusGlobal * cosf(gPhi) * sinTheta / UGlobal;
+    if (thetaId > nThetaGlobal*0.5 && thetaId < nThetaGlobal*0.625 && currentTimeGlobal < 5)
+    	uAir = -0.1*M_PI * radiusGlobal * cosf(gPhi) * sinTheta / UGlobal;
     fReal f6 = uAir - u1;
 
     // output
@@ -1242,16 +1234,19 @@ __global__ void applyforcevelphiKernel
 
     // fReal f7 = 0.0; 		// Van der Waals
     fReal uAir = 0.0;
-    // if (thetaId > nThetaGlobal*0.375 && thetaId < nThetaGlobal*0.5)
-    // 	uAir = M_2PI * radiusGlobal * cosf(gPhi) * sinTheta / UGlobal;
-    // if (thetaId > nThetaGlobal*0.5 && thetaId < nThetaGlobal*0.625)
-    // 	uAir = -M_2PI * radiusGlobal * cosf(gPhi) * sinTheta / UGlobal;
+    if (thetaId > nThetaGlobal*0.375 && thetaId < nThetaGlobal*0.5 && currentTimeGlobal < 5)
+    	uAir = M_PI * radiusGlobal * cosf(gPhi) * sinTheta / UGlobal;
+    if (thetaId > nThetaGlobal*0.5 && thetaId < nThetaGlobal*0.625 && currentTimeGlobal < 5)
+    	uAir = -M_PI * radiusGlobal * cosf(gPhi) * sinTheta / UGlobal;
 
     fReal f6 = CrGlobal * (uAir - u1);
     
     // output
-    velPhiOutput[thetaId * pitch + phiId] = (u1 + timeStepGlobal * (f2 + f3 + f4 + f5 + CrGlobal * uAir))
+    fReal result = (u1 + timeStepGlobal * (f2 + f3 + f4 + f5 + CrGlobal * uAir))
 	/ (1.0 + (CrGlobal + vTheta * invRadiusGlobal * cotTheta) * timeStepGlobal);
+    if (fabsf(result) < eps)
+	result = 0.f;
+    velPhiOutput[thetaId * pitch + phiId] = result;
 }
 
 
@@ -1417,28 +1412,29 @@ __global__ void applyforceSurfConcentration
     int thetaId = blockIdx.x / splitVal;
 	
     fReal gamma = sConcentrationInput[thetaId * pitch + phiId];
-    // fReal gammaWest = sConcentrationInput[thetaId * pitch + (phiId - 1 + nPhiGlobal) % nPhiGlobal];
-    // fReal gammaEast = sConcentrationInput[thetaId * pitch + (phiId + 1) % nPhiGlobal];
-    // fReal gammaNorth = 0.0;
-    // fReal gammaSouth = 0.0;
-    // if (thetaId != 0) {
-    // 	gammaNorth = sConcentrationInput[(thetaId - 1) * pitch + phiId];
-    // } else {
-    // 	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
-    // 	gammaNorth = sConcentrationInput[thetaId * pitch + oppositePhiId];
-    // }
-    // if (thetaId != nThetaGlobal - 1) {
-    // 	gammaSouth = sConcentrationInput[(thetaId + 1) * pitch + phiId];
-    // } else {
-    // 	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
-    // 	gammaSouth = sConcentrationInput[thetaId * pitch + oppositePhiId];
-    // }
-    // fReal laplace = invGridLenGlobal * invGridLenGlobal *
-    // 	(gammaWest - 4*gamma + gammaEast + gammaNorth + gammaSouth);
+    fReal gammaWest = sConcentrationInput[thetaId * pitch + (phiId - 1 + nPhiGlobal) % nPhiGlobal];
+    fReal gammaEast = sConcentrationInput[thetaId * pitch + (phiId + 1) % nPhiGlobal];
+    fReal gammaNorth = 0.0;
+    fReal gammaSouth = 0.0;
+    if (thetaId != 0) {
+    	gammaNorth = sConcentrationInput[(thetaId - 1) * pitch + phiId];
+    } else {
+    	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
+    	gammaNorth = sConcentrationInput[thetaId * pitch + oppositePhiId];
+    }
+    if (thetaId != nThetaGlobal - 1) {
+    	gammaSouth = sConcentrationInput[(thetaId + 1) * pitch + phiId];
+    } else {
+    	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
+    	gammaSouth = sConcentrationInput[thetaId * pitch + oppositePhiId];
+    }
+    fReal laplace = invGridLenGlobal * invGridLenGlobal *
+    	(gammaWest - 4*gamma + gammaEast + gammaNorth + gammaSouth);
     
     fReal f = div[thetaId * nPhiGlobal + phiId];
-    // fReal f2 = DsGlobal * laplace;
-    sConcentrationOutput[thetaId * pitch + phiId] = max(gamma / (1 + timeStepGlobal * f), 0.f);
+    fReal f2 = DsGlobal * laplace;
+
+    sConcentrationOutput[thetaId * pitch + phiId] = max((gamma + f2 * timeStepGlobal) / (1 + timeStepGlobal * f), 0.f);
 }
 
 
@@ -1446,101 +1442,106 @@ void KaminoSolver::bodyforce()
 {
     dim3 gridLayout;
     dim3 blockLayout;
-    
+
+    bool noVis = false;
     for (int i = 0; i < 3; i++) {
     	determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
-	if (i == 0) {
-	    applyforcevelthetaNoViscosityKernel<<<gridLayout, blockLayout>>>
-    	    (velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
-    	     thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(),
-    	     velTheta->getNextStepPitchInElements());
+
+	if (noVis) {
+	    if (i == 0) {
+		applyforcevelthetaNoViscosityKernel<<<gridLayout, blockLayout>>>
+		    (velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
+		     thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(),
+		     velTheta->getNextStepPitchInElements());
+	    } else {
+		applyforcevelthetaNoViscosityKernel<<<gridLayout, blockLayout>>>
+		    (velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUNextStep(),
+		     thickness->getGPUNextStep(), surfConcentration->getGPUNextStep(),
+		     velTheta->getNextStepPitchInElements()); 
+	    }
 	} else {
-	    applyforcevelthetaNoViscosityKernel<<<gridLayout, blockLayout>>>
-    	    (velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUNextStep(),
-    	     thickness->getGPUNextStep(), surfConcentration->getGPUNextStep(),
-    	     velTheta->getNextStepPitchInElements()); 
+	    if (i == 0) {
+		applyforcevelthetaKernel<<<gridLayout, blockLayout>>>
+		    (velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
+		     thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(), div,
+		     velTheta->getNextStepPitchInElements());
+	    } else {    	
+		applyforcevelthetaKernel<<<gridLayout, blockLayout>>>
+		    (velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUNextStep(),
+		     thickness->getGPUNextStep(), surfConcentration->getGPUNextStep(), div,
+		     velTheta->getNextStepPitchInElements());
+	    }
 	}
-	
-	// if (i == 0) {
-    	// applyforcevelthetaKernel<<<gridLayout, blockLayout>>>
-    	// 	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUNextStep(),
-    	// 	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(), div,
-    	// 	 velTheta->getNextStepPitchInElements());
-	// } else {    	
-    	// applyforcevelthetaKernel<<<gridLayout, blockLayout>>>
-    	// 	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUNextStep(),
-    	// 	 thickness->getGPUNextStep(), surfConcentration->getGPUNextStep(), div,
-    	// 	 velTheta->getNextStepPitchInElements());
-	// }
 
     	checkCudaErrors(cudaGetLastError());
     	checkCudaErrors(cudaDeviceSynchronize());
 
 	determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
-	if (i == 0) {
-	    applyforcevelphiNoViscosityKernel<<<gridLayout, blockLayout>>>
-    	    (velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUNextStep(),
-    	     thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(),
-    	     velPhi->getNextStepPitchInElements());
-	} else {    	
-	    applyforcevelphiNoViscosityKernel<<<gridLayout, blockLayout>>>
-    	    (velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUNextStep(),
-    	     thickness->getGPUNextStep(), surfConcentration->getGPUNextStep(),
-    	     velPhi->getNextStepPitchInElements());
+	if (noVis) {
+	    if (i == 0) {
+		applyforcevelphiNoViscosityKernel<<<gridLayout, blockLayout>>>
+		    (velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
+		     thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(),
+		     velPhi->getNextStepPitchInElements());
+	    } else {    	
+		applyforcevelphiNoViscosityKernel<<<gridLayout, blockLayout>>>
+		    (velPhi->getGPUNextStep(), velTheta->getGPUNextStep(), velPhi->getGPUThisStep(),
+		     thickness->getGPUNextStep(), surfConcentration->getGPUNextStep(),
+		     velPhi->getNextStepPitchInElements());
+	    }
+	} else {
+	    if (i == 0) {
+		applyforcevelphiKernel<<<gridLayout, blockLayout>>>
+		    (velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
+		     thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(), div,
+		     velPhi->getNextStepPitchInElements());
+	    } else {
+		applyforcevelphiKernel<<<gridLayout, blockLayout>>>
+		    (velPhi->getGPUNextStep(), velTheta->getGPUNextStep(), velPhi->getGPUThisStep(),
+		     thickness->getGPUNextStep(), surfConcentration->getGPUNextStep(), div,
+		     velPhi->getNextStepPitchInElements());
+	    }
 	}
-
-	// if (i == 0) {
-	//     applyforcevelphiKernel<<<gridLayout, blockLayout>>>
-    	// 	(velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
-    	// 	 thickness->getGPUThisStep(), surfConcentration->getGPUThisStep(), div,
-    	// 	 velPhi->getNextStepPitchInElements());
-	// } else {
-	//     applyforcevelphiKernel<<<gridLayout, blockLayout>>>
-    	// 	(velPhi->getGPUNextStep(), velTheta->getGPUThisStep(), velPhi->getGPUNextStep(),
-    	// 	 thickness->getGPUNextStep(), surfConcentration->getGPUNextStep(), div,
-    	// 	 velPhi->getNextStepPitchInElements());
-	// }
-		
-    	checkCudaErrors(cudaGetLastError());
-    	checkCudaErrors(cudaDeviceSynchronize());
 	
-
-    	determineLayout(gridLayout, blockLayout, nTheta, nPhi);
-    	comDivergenceKernel<<<gridLayout, blockLayout>>>
-    	    (div, velPhi->getGPUNextStep(), velTheta->getGPUNextStep(),
-    	     velPhi->getNextStepPitchInElements(), velTheta->getNextStepPitchInElements());
     	checkCudaErrors(cudaGetLastError());
+    	checkCudaErrors(cudaDeviceSynchronize());
 
-    	determineLayout(gridLayout, blockLayout, nTheta, nPhi);
-    	resetThickness<<<gridLayout, blockLayout>>>(weight);
-    	checkCudaErrors(cudaGetLastError());
+	determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+	comDivergenceKernel<<<gridLayout, blockLayout>>>
+	    (div, velPhi->getGPUNextStep(), velTheta->getGPUNextStep(),
+	     velPhi->getNextStepPitchInElements(), velTheta->getNextStepPitchInElements());
+	checkCudaErrors(cudaGetLastError());
+
+	determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+	resetThickness<<<gridLayout, blockLayout>>>(weight);
+	checkCudaErrors(cudaGetLastError());
     
-    	determineLayout(gridLayout, blockLayout, 1, particles->numOfParticles);
-    	applyforceParticles<<<gridLayout, blockLayout>>>
-    	    (particles->tempVal, particles->value, particles->coordGPUThisStep, div, particles->numOfParticles);
-    	checkCudaErrors(cudaGetLastError());
-    	checkCudaErrors(cudaDeviceSynchronize());
+	determineLayout(gridLayout, blockLayout, 1, particles->numOfParticles);
+	applyforceParticles<<<gridLayout, blockLayout>>>
+	    (particles->tempVal, particles->value, particles->coordGPUThisStep, div, particles->numOfParticles);
+	checkCudaErrors(cudaGetLastError());
+	checkCudaErrors(cudaDeviceSynchronize());
 
-    	determineLayout(gridLayout, blockLayout, 2, particles->numOfParticles);
-    	mapParticlesToThickness<<<gridLayout, blockLayout>>>
-    	    (particles->coordGPUThisStep, particles->tempVal,  weight, particles->numOfParticles);
-    	checkCudaErrors(cudaGetLastError());
+	determineLayout(gridLayout, blockLayout, 2, particles->numOfParticles);
+	mapParticlesToThickness<<<gridLayout, blockLayout>>>
+	    (particles->coordGPUThisStep, particles->tempVal,  weight, particles->numOfParticles);
+	checkCudaErrors(cudaGetLastError());
 
-    	determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
-    	applyforceSurfConcentration<<<gridLayout, blockLayout>>>
-    	    (surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
-    	     div, surfConcentration->getNextStepPitchInElements());
-    	checkCudaErrors(cudaGetLastError());
-    	checkCudaErrors(cudaDeviceSynchronize());
+	determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
+	applyforceSurfConcentration<<<gridLayout, blockLayout>>>
+	    (surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
+	     div, surfConcentration->getNextStepPitchInElements());
+	checkCudaErrors(cudaGetLastError());
+	checkCudaErrors(cudaDeviceSynchronize());
         
-    	determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
-    	normalizeThickness<<<gridLayout, blockLayout>>>
-    	    (thickness->getGPUNextStep(), thickness->getGPUThisStep(), velPhi->getGPUNextStep(),
-    	     velTheta->getGPUNextStep(), div, weight, thickness->getNextStepPitchInElements());
-    	checkCudaErrors(cudaGetLastError());
-    	checkCudaErrors(cudaDeviceSynchronize());
+	determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
+	normalizeThickness<<<gridLayout, blockLayout>>>
+	    (thickness->getGPUNextStep(), thickness->getGPUThisStep(), velPhi->getGPUNextStep(),
+	     velTheta->getGPUNextStep(), div, weight, thickness->getNextStepPitchInElements());
+	checkCudaErrors(cudaGetLastError());
+	checkCudaErrors(cudaDeviceSynchronize());       
     }
-
+ 
     std::swap(particles->tempVal, particles->value);
     thickness->swapGPUBuffer();
     surfConcentration->swapGPUBuffer();
@@ -1854,6 +1855,10 @@ void Kamino::run()
 # endif  
 # ifdef WRITE_VELOCITY_DATA
     solver.write_velocity_image(velocityPath, 0);
+    size_t split = velocityPath.find("/");
+    std::string concentrationPath = velocityPath;
+    concentrationPath.replace(concentrationPath.begin() + split + 1, concentrationPath.end(), "con");
+    solver.write_concentration_image(concentrationPath, 0);
 # endif
 
 # ifdef PERFORMANCE_BENCHMARK
@@ -1893,6 +1898,7 @@ void Kamino::run()
 # endif
 # ifdef WRITE_VELOCITY_DATA
 	solver.write_velocity_image(velocityPath, i);
+	solver.write_concentration_image(concentrationPath, i);
 # endif
     }
 
@@ -1901,5 +1907,5 @@ void Kamino::run()
 # endif
 
     std::cout << "Time spent: " << gpu_time << "ms" << std::endl;
-    std::cout << "Performance: " << 1000.0 * frames / gpu_time << " frames per second" << std::endl;
+    std::cout << "Performance: " << 1000.0 * i / gpu_time << " frames per second" << std::endl;
 }

@@ -577,12 +577,19 @@ void KaminoSolver::write_image(const std::string& s, size_t width, size_t height
 }
 
 void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
-    std::string file_string = std::to_string(frame);
-    while (file_string.length() < 4) {
-	file_string.insert(0, "0");
+    std::string img_string = std::to_string(frame);
+    while (img_string.length() < 4) {
+	img_string.insert(0, "0");
     }
-    file_string.insert(0, s);
-    file_string.append(".exr");
+    img_string.insert(0, s);
+    std::string u_string = img_string;
+    std::string v_string = img_string;
+    img_string.append(".exr");
+    u_string.append("u.txt");
+    v_string.append("v.txt");
+
+    std::ofstream ofu(u_string);
+    std::ofstream ofv(v_string);
 
     copyVelocityBack2CPU();
     std::vector<float> images[3];
@@ -594,10 +601,19 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
     fReal maxv = std::numeric_limits<fReal>::min();
     fReal minu = std::numeric_limits<fReal>::max();
     fReal minv = std::numeric_limits<fReal>::max();
+    size_t maxuthetaid = 0;
+    size_t maxuphiid = 0;
+    size_t minuthetaid = 0;
+    size_t minuphiid = 0;
+    size_t maxvthetaid = 0;
+    size_t maxvphiid = 0;
+    size_t minvthetaid = 0;
+    size_t minvphiid = 0;
 
     for (size_t j = 0; j < nTheta; ++j) {
 	for (size_t i = 0; i < nPhi; ++i) {
 	    fReal uW = velPhi->getCPUValueAt(i, j);
+	    ofu << uW << " ";
 	    fReal uE;
 	    fReal vN;
 	    fReal vS;
@@ -615,6 +631,7 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
 	    }
 	    if (j != nTheta - 1) {
 		vS = velTheta->getCPUValueAt(i, j);
+		ofv << vS << " ";
 	    } else {
 		size_t oppositei = (i + nPhi/2) % nPhi;
 		vS = 0.75 * velTheta->getCPUValueAt(i, j - 1) -
@@ -622,25 +639,78 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
 	    }
 	    fReal u = 0.5 * (uW + uE);
 	    fReal v = 0.5 * (vN + vS);
-	    if (u > maxu)
+	    if (u > maxu) {
 		maxu = u;
-	    if (u < minu)
+		maxuthetaid = j;
+		maxuphiid = i;
+	    }
+		
+	    if (u < minu) {
 		minu = u;
-	    if (v > maxv)
+		minuthetaid = j;
+		minuphiid = i;
+	    }		
+	    if (v > maxv) {
 		maxv = v;
-	    if (v < minv)
+		maxvthetaid = j;
+		maxvphiid = i;
+	    }		
+	    if (v < minv) {
 		minv = v;
+		minvthetaid = j;
+		minvphiid = i;
+	    }
+		
+	    // std::cout << "theta " << j << " phi " << i << " u " << u << " v " << v << std::endl;
 	    images[0][j*nPhi+i] = u/2+0.5; // R
 	    images[1][j*nPhi+i] = v/2+0.5; // G
 	    images[2][j*nPhi+i] = 0.5; // B
 	}
+	ofu << std::endl;
+	ofv << std::endl;
     }
 
-    std::cout << "max u = " << maxu << " min u = " << minu << std::endl;
-    std::cout << "max v = " << maxv << " min v = " << minv << std::endl;
+    std::cout << "max u = " << maxu << " theta " << maxuthetaid << " phi " << maxuphiid << std::endl;
+    std::cout << "min u = " << minu << " theta " << minuthetaid << " phi " << minuphiid << std::endl;
+    std::cout << "max v = " << maxv << " theta " << maxvthetaid << " phi " << maxvphiid << std::endl;
+    std::cout << "min v = " << minv << " theta " << minvthetaid << " phi " << minvphiid << std::endl;
 
-    write_image(file_string, nPhi, nTheta, images);
+    write_image(img_string, nPhi, nTheta, images);
 }
+
+void KaminoSolver::write_concentration_image(const std::string& s, const int frame) {
+    std::string img_string = std::to_string(frame);
+    while (img_string.length() < 4) {
+	img_string.insert(0, "0");
+    }
+    img_string.insert(0, s);
+    std::string mat_string = img_string;
+    img_string.append(".exr");
+    mat_string.append(".txt");
+
+    std::ofstream of(mat_string);
+
+    surfConcentration->copyBackToCPU();
+    std::vector<float> images[3];
+    images[0].resize(nPhi * nTheta);
+    images[1].resize(nPhi * nTheta);
+    images[2].resize(nPhi * nTheta);
+
+    for (size_t j = 0; j < nTheta; ++j) {
+	for (size_t i = 0; i < nPhi; ++i) {
+	    fReal con = surfConcentration->getCPUValueAt(i, j);
+	  
+	    // std::cout << "theta " << j << " phi " << i << " u " << u << " v " << v << std::endl;
+	    images[0][j*nPhi+i] = con*0.2;
+	    images[1][j*nPhi+i] = con*0.2;
+	    images[2][j*nPhi+i] = con*0.2;
+	    of << con << " ";
+	}
+	of << std::endl;
+    }
+
+    write_image(img_string, nPhi, nTheta, images);
+} 
 
 __global__ void upsampleParticles
 (fReal* particleCoord, fReal* particleVal, float2* weight, size_t numParticles)
@@ -755,12 +825,16 @@ __global__ void normalizeThickness
 
 void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 {
-    std::string file_string = std::to_string(frame);
-    while (file_string.length() < 4) {
-	file_string.insert(0, "0");
+    std::string img_string = std::to_string(frame);
+    while (img_string.length() < 4) {
+	img_string.insert(0, "0");
     }
-    file_string.insert(0, s);
-    file_string.append(".exr");
+    img_string.insert(0, s);
+    std::string mat_string = img_string;
+    img_string.append(".exr");
+    mat_string.append(".txt");
+
+    std::ofstream of(mat_string);
 
     //    if (frame != 0) {
     if (true) {
@@ -783,28 +857,53 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
 	cudaMemcpy(thicknessFullCPU, thicknessFull, (cols * rows) * sizeof(fReal), cudaMemcpyDeviceToHost);
-    }
-    
-    std::vector<float> images[3];
-    images[0].resize(cols * rows);
-    images[1].resize(cols * rows);
-    images[2].resize(cols * rows);
 
-    for (size_t j = 0; j < rows; ++j) {
-	for (size_t i = 0; i < cols; ++i) {
-	    fReal Delta = thicknessFullCPU[j * cols + i];
-	    if (Delta < 0) { 
-		this->setBroken(true);
-		return;
-	    } else {
-		images[0][j * cols + i] = Delta * this->H * 5e5;
-		images[1][j * cols + i] = Delta * this->H * 5e5;
-		images[2][j * cols + i] = Delta * this->H * 5e5;
+	std::vector<float> images[3];
+	images[0].resize(cols * rows);
+	images[1].resize(cols * rows);
+	images[2].resize(cols * rows);
+
+	for (size_t j = 0; j < rows; ++j) {
+	    for (size_t i = 0; i < cols; ++i) {
+		fReal Delta = thicknessFullCPU[j * cols + i];
+		if (Delta < 0) { 
+		    this->setBroken(true);
+		    return;
+		} else {
+		    images[0][j * cols + i] = Delta * this->H * 5e5;
+		    images[1][j * cols + i] = Delta * this->H * 5e5;
+		    images[2][j * cols + i] = Delta * this->H * 5e5;
+		}
 	    }
 	}
-    }
 
-    write_image(file_string, cols, rows, images);
+	write_image(img_string, cols, rows, images);
+    } else {
+	thickness->copyBackToCPU();
+
+	std::vector<float> images[3];
+	images[0].resize(nPhi * nTheta);
+	images[1].resize(nPhi * nTheta);
+	images[2].resize(nPhi * nTheta);
+
+	for (size_t j = 0; j < nTheta; ++j) {
+	    for (size_t i = 0; i < nPhi; ++i) {
+		fReal Delta = thickness->getCPUValueAt(i, j);
+		if (Delta < 0) {
+		    this->setBroken(true);
+		}    //		    return;
+		//} else {
+		images[0][j*nPhi+i] = Delta * this->H * 5e5;
+		images[1][j*nPhi+i] = Delta * this->H * 5e5;
+		images[2][j*nPhi+i] = Delta * this->H * 5e5;
+		of << Delta << " ";
+		//}
+	    }
+	    of << std::endl;
+	}
+
+	write_image(img_string, nPhi, nTheta, images);
+    }    
 }
 
 // void KaminoSolver::write_data_bgeo(const std::string& s, const int frame)
