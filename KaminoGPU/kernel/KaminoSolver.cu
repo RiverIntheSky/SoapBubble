@@ -873,8 +873,10 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 		    images[0][j * cols + i] = Delta * this->H * 5e5;
 		    images[1][j * cols + i] = Delta * this->H * 5e5;
 		    images[2][j * cols + i] = Delta * this->H * 5e5;
+		    of << Delta << " ";
 		}
 	    }
+	    of << std::endl;
 	}
 
 	write_image(img_string, cols, rows, images);

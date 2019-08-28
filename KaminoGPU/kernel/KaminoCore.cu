@@ -1867,10 +1867,12 @@ void Kamino::run()
 # endif
 
     float T = 0.0;              // simulation time
-    for (int i = 1; i < frames; i++) {
+    int i = 1;
+    for (; i < frames; i++) {
 	checkCudaErrors(cudaMemcpyToSymbol(currentTimeGlobal, &T, sizeof(fReal)));
 	std::cout << "current time " << T << std::endl;
-        // solver.adjustStepSize(dt, U, epsilon);
+	// if (i > 1)
+	//     solver.adjustStepSize(dt, U, epsilon);
 	//dt = 0.0005;
 
 	checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &dt, sizeof(fReal)));
@@ -1879,8 +1881,6 @@ void Kamino::run()
     
 	while ((T + dt/this->U) <= i*DT && !solver.isBroken()) {
 	    solver.stepForward();
-	    int temp = 0.0;
-	    checkCudaErrors(cudaMemcpyToSymbol(currentTimeGlobal, &temp, sizeof(fReal)));
 	    T += dt/this->U;
 	}
 	if (T < i*DT) {
