@@ -50,6 +50,7 @@ private:
     std::string colorImage;       // file path of image defining particle color
 
     fReal particleDensity;	  // how many particles in a grid cell
+    int device;			  // which gpu device to use
 
 public:
     Kamino(fReal radius = 0.05, fReal H = 0.0000005, fReal U = 1.0, fReal c_m = 0.5,
@@ -58,7 +59,7 @@ public:
 	   float DT = 1.0 / 24.0, int frames = 1000,
 	   fReal A = 0.0, int B = 1, int C = 1, int D = 1, int E = 1,
 	   std::string thicknessPath = "output/frame", std::string velocityPath = "output/vel",
-	   std::string thicknessImage = "", size_t particleDensity = 8);
+	   std::string thicknessImage = "", size_t particleDensity = 8, int device = 0);
     ~Kamino();
 
     /* run the solver */

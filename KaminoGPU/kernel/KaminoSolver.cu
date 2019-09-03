@@ -88,15 +88,16 @@ __global__ void initParticleValues(fReal* particleVal, fReal* particleCoord, fRe
     particleVal[particleId] = sampleThickness(thickness, phiId, thetaId);
 }
 
+
 KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
-			   fReal A, int B, int C, int D, int E, fReal H) :
+			   fReal A, int B, int C, int D, int E, fReal H, int device) :
     nPhi(nPhi), nTheta(nTheta), radius(radius), invRadius(1.0/radius), gridLen(M_2PI / nPhi), invGridLen(1.0 / gridLen), frameDuration(frameDuration),
     timeStep(0.0), timeElapsed(0.0), advectionTime(0.0), geometricTime(0.0), projectionTime(0.0),
     A(A), B(B), C(C), D(D), E(E), H(H)
 {
     /// FIXME: Should we detect and use device 0?
     /// Replace it later with functions from helper_cuda.h!
-    checkCudaErrors(cudaSetDevice(0));
+    checkCudaErrors(cudaSetDevice(device));
 
     cudaDeviceProp deviceProp;
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, 0));
@@ -513,13 +514,15 @@ void KaminoSolver::initThicknessfromPic(std::string path, size_t particleDensity
     cudaMemcpy(thicknessFull, thicknessFullCPU, (cols * rows) * sizeof(fReal), cudaMemcpyHostToDevice);
     this->particles = new KaminoParticles(path, particleDensity, gridLen, nTheta);
 
-    dim3 gridLayout;
-    dim3 blockLayout;
-    determineLayout(gridLayout, blockLayout, 1, this->particles->numOfParticles);
-    initParticleValues<<<gridLayout, blockLayout>>>
-	(this->particles->value, this->particles->coordGPUThisStep, thicknessFull);
-    checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
+    if (particleDensity > 0) {
+	dim3 gridLayout;
+	dim3 blockLayout;
+	determineLayout(gridLayout, blockLayout, 1, this->particles->numOfParticles);
+	initParticleValues<<<gridLayout, blockLayout>>>
+	    (this->particles->value, this->particles->coordGPUThisStep, thicknessFull);
+	checkCudaErrors(cudaGetLastError());
+	checkCudaErrors(cudaDeviceSynchronize());	
+    }
 }
 
 void KaminoSolver::initParticlesfromPic(std::string path, size_t parPerGrid)
@@ -784,41 +787,43 @@ __global__ void normalizeThickness
     fReal w = currentWeight->x;
     fReal val = currentWeight->y;
 
+    thicknessHighRes[thetaId * Cols + phiId] = 0.f;
+    __syncthreads();
+
     if (w > 0) {
-	thicknessHighRes[thetaId * Cols + phiId] = val / w;
-	// printf("thetaId %d phiId %d\n", thetaId, phiId);
+    	thicknessHighRes[thetaId * Cols + phiId] = val / w;
     } 
     __syncthreads();
     if (w == 0) {
-    	int neighbors[4];
-    	if (thetaId == 0) {
-    	    neighbors[0] = thetaId * Cols + (phiId + Cols / 2) % Cols;
-    	} else {
-    	    neighbors[0] = (thetaId - 1) * Cols + phiId;
-    	}
-    	if (thetaId == Rows - 1) {
-    	    neighbors[1] = thetaId * Cols + (phiId + Cols / 2) % Cols;
-    	} else {
-    	    neighbors[1] = (thetaId + 1) * Cols + phiId;
-    	}
-    	neighbors[2] = thetaId * Cols + (phiId + 1) % Cols;
-    	neighbors[3] = thetaId * Cols + (phiId - 1 + Cols) % Cols;
-    	fReal valn = 0.f;
-    	int nonZero = 0;
-    	for (int i = 0; i < 4; i++) {
-    	    fReal currentNeighbor = thicknessHighRes[neighbors[i]];
-    	    if (currentNeighbor > 0) {
-    		valn += currentNeighbor;
-    		nonZero++;
-    	    }
-    	}
-    	if (nonZero > 0) {
-    	    thicknessHighRes[thetaId * Cols + phiId] = valn / nonZero;
-    	} else {
-    	fReal gPhiId = ((fReal)phiId + centeredPhiOffset) / Ratio;
-    	fReal gThetaId = ((fReal)thetaId + centeredThetaOffset) / Ratio;
-      	thicknessHighRes[thetaId * Cols + phiId] = sampleCentered(thicknessLowRes, gPhiId, gThetaId, pitch);
-    	}
+    	// int neighbors[4];
+    	// if (thetaId == 0) {
+    	//     neighbors[0] = thetaId * Cols + (phiId + Cols / 2) % Cols;
+    	// } else {
+    	//     neighbors[0] = (thetaId - 1) * Cols + phiId;
+    	// }
+    	// if (thetaId == Rows - 1) {
+    	//     neighbors[1] = thetaId * Cols + (phiId + Cols / 2) % Cols;
+    	// } else {
+    	//     neighbors[1] = (thetaId + 1) * Cols + phiId;
+    	// }
+    	// neighbors[2] = thetaId * Cols + (phiId + 1) % Cols;
+    	// neighbors[3] = thetaId * Cols + (phiId - 1 + Cols) % Cols;
+    	// fReal valn = 0.f;
+    	// int nonZero = 0;
+    	// for (int i = 0; i < 4; i++) {
+    	//     fReal currentNeighbor = thicknessHighRes[neighbors[i]];
+    	//     if (currentNeighbor > 0) {
+    	// 	valn += currentNeighbor;
+    	// 	nonZero++;
+    	//     }
+    	// }
+    	// if (nonZero == 4) {
+    	//     thicknessHighRes[thetaId * Cols + phiId] = valn / nonZero;
+	// } else {
+	    fReal gPhiId = ((fReal)phiId + centeredPhiOffset) / Ratio;
+	    fReal gThetaId = ((fReal)thetaId + centeredThetaOffset) / Ratio;
+	    thicknessHighRes[thetaId * Cols + phiId] = sampleCentered(thicknessLowRes, gPhiId, gThetaId, pitch);
+	// }
     }
 }
 
@@ -844,13 +849,15 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 	resetThickness<<<gridLayout, blockLayout>>>(weightFull);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
-    
-	determineLayout(gridLayout, blockLayout, 2, particles->numOfParticles);
-	upsampleParticles<<<gridLayout, blockLayout>>>
-	    (particles->coordGPUThisStep, particles->value, weightFull, particles->numOfParticles);
-	checkCudaErrors(cudaGetLastError());
-	checkCudaErrors(cudaDeviceSynchronize());
-
+	
+        if (particles->numOfParticles > 0) {
+	    determineLayout(gridLayout, blockLayout, 2, particles->numOfParticles);
+	    upsampleParticles<<<gridLayout, blockLayout>>>
+		(particles->coordGPUThisStep, particles->value, weightFull, particles->numOfParticles);
+	    checkCudaErrors(cudaGetLastError());
+	    checkCudaErrors(cudaDeviceSynchronize());
+	}
+	
 	determineLayout(gridLayout, blockLayout, rows, cols);
 	normalizeThickness<<<gridLayout, blockLayout>>>
 	    (thicknessFull, thickness->getGPUThisStep(), weightFull, thickness->getThisStepPitchInElements());

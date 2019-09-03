@@ -126,7 +126,7 @@ private:
 			 size_t nRow_theta, size_t nCol_phi);
 public:
     KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
-		 fReal A, int B, int C, int D, int E, fReal H);
+		 fReal A, int B, int C, int D, int E, fReal H, int device);
     ~KaminoSolver();
 
     void initWithConst(KaminoQuantity* attrib, fReal val);

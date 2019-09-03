@@ -508,12 +508,14 @@ void KaminoSolver::advection()
     checkCudaErrors(cudaDeviceSynchronize());
  
     // Advect thickness particles
-    determineLayout(gridLayout, blockLayout, 1, particles->numOfParticles);
-    advectionParticles<<<gridLayout, blockLayout>>>
-	(particles->coordGPUNextStep, velPhi->getGPUThisStep(), velTheta->getGPUThisStep(),
-	 particles->coordGPUThisStep, velPhi->getThisStepPitchInElements(), particles->numOfParticles);
-    checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
+    if (particles->numOfParticles > 0) {
+	determineLayout(gridLayout, blockLayout, 1, particles->numOfParticles);
+	advectionParticles<<<gridLayout, blockLayout>>>
+	    (particles->coordGPUNextStep, velPhi->getGPUThisStep(), velTheta->getGPUThisStep(),
+	     particles->coordGPUThisStep, velPhi->getThisStepPitchInElements(), particles->numOfParticles);
+	checkCudaErrors(cudaGetLastError());
+	checkCudaErrors(cudaDeviceSynchronize());
+    }
   
     // Advect concentration
     determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
@@ -975,8 +977,6 @@ __global__ void applyforcevelthetaKernel
     // fReal f7 = gGlobal * sinTheta;
     fReal f7 = 0.0; 		// Van der Waals
     fReal vAir = 0.0;
-    // if (thetaId > nThetaGlobal*0.4375 && thetaId < nThetaGlobal*0.5625)
-    // 	vAir = -M_2PI * radiusGlobal * sinf(gPhi) * cotTheta;
     fReal f6 = CrGlobal * (vAir - v1);
     
     // output
@@ -1060,10 +1060,8 @@ __global__ void applyforcevelphiNoViscosityKernel
     fReal f3 = -2 * MGlobal * invDelta * invRadiusGlobal * cscTheta * pGpx;
 
     fReal uAir = 0.0;
-    if (thetaId > nThetaGlobal*0.375 && thetaId < nThetaGlobal*0.5 && currentTimeGlobal < 5)
-    	uAir = 0.1*M_PI * radiusGlobal * cosf(gPhi) * sinTheta / UGlobal;
-    if (thetaId > nThetaGlobal*0.5 && thetaId < nThetaGlobal*0.625 && currentTimeGlobal < 5)
-    	uAir = -0.1*M_PI * radiusGlobal * cosf(gPhi) * sinTheta / UGlobal;
+    if (currentTimeGlobal < 5)
+	uAir = 20.f * (M_hPI - gTheta) * expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal * cosf(gPhi) / UGlobal;
     fReal f6 = uAir - u1;
 
     // output
@@ -1234,10 +1232,8 @@ __global__ void applyforcevelphiKernel
 
     // fReal f7 = 0.0; 		// Van der Waals
     fReal uAir = 0.0;
-    if (thetaId > nThetaGlobal*0.375 && thetaId < nThetaGlobal*0.5 && currentTimeGlobal < 5)
-    	uAir = M_PI * radiusGlobal * cosf(gPhi) * sinTheta / UGlobal;
-    if (thetaId > nThetaGlobal*0.5 && thetaId < nThetaGlobal*0.625 && currentTimeGlobal < 5)
-    	uAir = -M_PI * radiusGlobal * cosf(gPhi) * sinTheta / UGlobal;
+    if (currentTimeGlobal < 5)
+	uAir = 20.f * (M_hPI - gTheta) * expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal * cosf(gPhi) / UGlobal;
 
     fReal f6 = CrGlobal * (uAir - u1);
     
@@ -1516,16 +1512,18 @@ void KaminoSolver::bodyforce()
 	resetThickness<<<gridLayout, blockLayout>>>(weight);
 	checkCudaErrors(cudaGetLastError());
     
-	determineLayout(gridLayout, blockLayout, 1, particles->numOfParticles);
-	applyforceParticles<<<gridLayout, blockLayout>>>
-	    (particles->tempVal, particles->value, particles->coordGPUThisStep, div, particles->numOfParticles);
-	checkCudaErrors(cudaGetLastError());
-	checkCudaErrors(cudaDeviceSynchronize());
+	if (particles->numOfParticles > 0) {
+	    determineLayout(gridLayout, blockLayout, 1, particles->numOfParticles);
+	    applyforceParticles<<<gridLayout, blockLayout>>>
+		(particles->tempVal, particles->value, particles->coordGPUThisStep, div, particles->numOfParticles);
+	    checkCudaErrors(cudaGetLastError());
+	    checkCudaErrors(cudaDeviceSynchronize());
 
-	determineLayout(gridLayout, blockLayout, 2, particles->numOfParticles);
-	mapParticlesToThickness<<<gridLayout, blockLayout>>>
-	    (particles->coordGPUThisStep, particles->tempVal,  weight, particles->numOfParticles);
-	checkCudaErrors(cudaGetLastError());
+	    determineLayout(gridLayout, blockLayout, 2, particles->numOfParticles);
+	    mapParticlesToThickness<<<gridLayout, blockLayout>>>
+		(particles->coordGPUThisStep, particles->tempVal,  weight, particles->numOfParticles);
+	    checkCudaErrors(cudaGetLastError());
+	}
 
 	determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
 	applyforceSurfConcentration<<<gridLayout, blockLayout>>>
@@ -1535,9 +1533,15 @@ void KaminoSolver::bodyforce()
 	checkCudaErrors(cudaDeviceSynchronize());
         
 	determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
-	normalizeThickness<<<gridLayout, blockLayout>>>
-	    (thickness->getGPUNextStep(), thickness->getGPUThisStep(), velPhi->getGPUNextStep(),
-	     velTheta->getGPUNextStep(), div, weight, thickness->getNextStepPitchInElements());
+	if (i == 0) {
+	    normalizeThickness<<<gridLayout, blockLayout>>>
+		(thickness->getGPUNextStep(), thickness->getGPUThisStep(), velPhi->getGPUThisStep(),
+		 velTheta->getGPUThisStep(), div, weight, thickness->getNextStepPitchInElements());
+	} else {
+	    normalizeThickness<<<gridLayout, blockLayout>>>
+		(thickness->getGPUNextStep(), thickness->getGPUThisStep(), velPhi->getGPUNextStep(),
+		 velTheta->getGPUNextStep(), div, weight, thickness->getNextStepPitchInElements());
+	}
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());       
     }
@@ -1810,7 +1814,7 @@ Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
 	       fReal T, fReal Ds, fReal rm, size_t nTheta, 
 	       float dt, float DT, int frames, fReal A, int B, int C, int D, int E,
 	       std::string thicknessPath, std::string velocityPath,
-	       std::string thicknessImage, size_t particleDensity) :
+	       std::string thicknessImage, size_t particleDensity, int device):
     radius(radius), invRadius(1/radius), H(H), U(U), c_m(c_m), Gamma_m(Gamma_m), T(T),
     Ds(Ds), gs(g/(U*U)), rm(rm), epsilon(H), sigma_r(R*T), M(Gamma_m*R*T/(3*rho*H*U*U)),
     S(sigma_a*H/(2*mu*U)), re(mu/(rho*U)), Cr(rhoa*sqrt(mua)/(rho*U*H)),
@@ -1819,7 +1823,7 @@ Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
     dt(dt), DT(DT), frames(frames),
     A(A), B(B), C(C), D(D), E(E),
     thicknessPath(thicknessPath), velocityPath(velocityPath),
-    thicknessImage(thicknessImage), particleDensity(particleDensity)
+    thicknessImage(thicknessImage), particleDensity(particleDensity), device(device)
 {
     std::cout << "Re^-1 " << re << std::endl;
     std::cout << "S " << S << std::endl;
@@ -1831,7 +1835,7 @@ Kamino::~Kamino()
 
 void Kamino::run()
 {
-    KaminoSolver solver(nPhi, nTheta, radius, dt, A, B, C, D, E, H);
+    KaminoSolver solver(nPhi, nTheta, radius, dt, A, B, C, D, E, H, device);
 
     checkCudaErrors(cudaMemcpyToSymbol(nPhiGlobal, &(this->nPhi), sizeof(size_t)));
     checkCudaErrors(cudaMemcpyToSymbol(nThetaGlobal, &(this->nTheta), sizeof(size_t)));
