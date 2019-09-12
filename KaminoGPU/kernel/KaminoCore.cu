@@ -264,9 +264,13 @@ __global__ void advectionVPhiKernel
     // Sample the speed
     fReal guTheta = sampleVTheta(velTheta, gPhiId, gThetaId, pitch);
     fReal guPhi = velPhi[thetaId * pitch + phiId];
-       
-    fReal cofTheta = timeStepGlobal * invRadiusGlobal * invGridLenGlobal;
+
+    fReal cofTheta = timeStepGlobal * invGridLenGlobal;
+# ifdef sphere
     fReal cofPhi = cofTheta / sinf(gTheta);
+# else
+    fReal cofPhi = cofTheta;
+# endif
     
     fReal deltaPhi = guPhi * cofPhi;
     fReal deltaTheta = guTheta * cofTheta;
@@ -302,6 +306,7 @@ __global__ void advectionVThetaKernel
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    
     // Coord in phi-theta space
     fReal gPhiId = (fReal)phiId + vThetaPhiOffset;
     fReal gThetaId = (fReal)thetaId + vThetaThetaOffset;
@@ -317,8 +322,12 @@ __global__ void advectionVThetaKernel
     fReal guPhi = 0.25 * (u0 + u1 + u2 + u3);
     fReal guTheta = velTheta[thetaId * pitch + phiId];
     
-    fReal cofTheta = timeStepGlobal * invRadiusGlobal * invGridLenGlobal;
+    fReal cofTheta = timeStepGlobal * invGridLenGlobal;
+# ifdef sphere
     fReal cofPhi = cofTheta / sinf(gTheta);
+# else
+    fReal cofPhi = cofTheta;
+# endif
     
     fReal deltaPhi = guPhi * cofPhi;
     fReal deltaTheta = guTheta * cofTheta;
@@ -364,8 +373,12 @@ __global__ void advectionCentered
     fReal guPhi = 0.5 * (velPhi[thetaId * nPitchInElements + phiId] +
     			 velPhi[thetaId * nPitchInElements + (phiId + 1) % nPhiGlobal]);
 
-    fReal cofTheta = timeStepGlobal * invRadiusGlobal * invGridLenGlobal;
+    fReal cofTheta = timeStepGlobal * invGridLenGlobal;
+# ifdef sphere
     fReal cofPhi = cofTheta / sinf(gTheta);
+# else
+    fReal cofPhi = cofTheta;
+# endif
 
     fReal deltaPhi = guPhi * cofPhi;
     fReal deltaTheta = guTheta * cofTheta;
@@ -409,8 +422,12 @@ __global__ void advectionAllCentered
     fReal guPhi = 0.5 * (velPhi[thetaId * nPitchInElements + phiId] +
     			 velPhi[thetaId * nPitchInElements + (phiId + 1) % nPhiGlobal]);
 
-    fReal cofTheta = timeStepGlobal * invRadiusGlobal * invGridLenGlobal;
+    fReal cofTheta = timeStepGlobal * invGridLenGlobal;
+# ifdef sphere
     fReal cofPhi = cofTheta / sinf(gTheta);
+# else
+    fReal cofPhi = cofTheta;
+# endif
 
     fReal deltaPhi = guPhi * cofPhi;
     fReal deltaTheta = guTheta * cofTheta;
@@ -450,10 +467,14 @@ __global__ void advectionParticles(fReal* output, fReal* velPhi, fReal* velTheta
 
 	fReal uPhi = sampleVPhi(velPhi, phiId, thetaId, pitch);
 	fReal uTheta = sampleVTheta(velTheta, phiId, thetaId, pitch);
-    
-	fReal cofTheta = timeStepGlobal * invRadiusGlobal * invGridLenGlobal;
-	fReal cofPhi = cofTheta / sinTheta;
 
+	fReal cofTheta = timeStepGlobal * invGridLenGlobal;
+# ifdef sphere
+	fReal cofPhi = cofTheta / sinTheta;
+# else
+	fReal cofPhi = cofTheta;
+# endif
+	
 	fReal deltaPhi = uPhi * cofPhi;
 	fReal deltaTheta = uTheta * cofTheta;
 
@@ -772,11 +793,16 @@ __global__ void comDivergenceKernel
     }
     // otherwise sin(theta) = 0;
 
+#ifdef sphere
     fReal invGridSine = 1.0 / sinf(thetaCoord);
     fReal sinNorth = sinf(thetaNorth);
     fReal sinSouth = sinf(thetaSouth);
-    fReal factor = invGridSine * invRadiusGlobal * invGridLenGlobal;
+    fReal factor = invGridSine * invGridLenGlobal;
     fReal termTheta = factor * (vSouth * sinSouth - vNorth * sinNorth);
+#else
+    fReal factor = invGridLenGlobal;
+    fReal termTheta = factor * (vSouth  - vNorth);
+#endif
     fReal termPhi = factor * (uEast - uWest);
 
     fReal f = termTheta + termPhi;
@@ -832,14 +858,20 @@ __global__ void applyforcevelthetaNoViscosityKernel
     fReal pGpy = invGridLenGlobal * (GammaSouth - GammaNorth);
 
     // force terms
-    fReal f1 = uPhi * uPhi * cotTheta * invRadiusGlobal;
-
-    fReal f3 = -2 * MGlobal * invDelta * invRadiusGlobal * pGpy;
+#ifdef sphere
+    fReal f1 = uPhi * uPhi * cotTheta ;
+#else
+    fReal f1 = 0.f;
+#endif
+    fReal f3 = -2 * MGlobal * invDelta * pGpy;
 
     fReal vAir = 0.0;
     fReal f6 = vAir - v1;
-    // fReal f7 = gGlobal * sinTheta;
+# ifdef gravity
+    fReal f7 = gGlobal * sinTheta;
+# else
     fReal f7 = 0.0;
+# endif
 
     // output
     velThetaOutput[thetaId * pitch + phiId] = (v1 + timeStepGlobal * (f1 + f3 + CrGlobal * vAir + f7))
@@ -946,12 +978,12 @@ __global__ void applyforcevelthetaKernel
 
     // stress
     // TODO: laplace term
-    fReal sigma11North = 0. +  2 * (invRadiusGlobal * pvpyNorth + divNorth);
-    fReal sigma11South = 0. +  2 * (invRadiusGlobal * pvpySouth + divSouth);
+    fReal sigma11North = 0. +  2 * (pvpyNorth + divNorth);
+    fReal sigma11South = 0. +  2 * (pvpySouth + divSouth);
     
-    // fReal sigma11 = 0. +  2 * invRadiusGlobal * pvpy + 2 * div;
-    fReal sigma22 = -2 * invRadiusGlobal * pvpy + 4 * div;
-    fReal sigma12 = invRadiusGlobal * (cscTheta * pvpx + pupy - uPhi * cotTheta);
+    // fReal sigma11 = 0. +  2 * pvpy + 2 * div;
+    fReal sigma22 = -2 * (pvpy - 2 * div);
+    fReal sigma12 = cscTheta * pvpx + pupy - uPhi * cotTheta;
 
     // psspy = \frac{\partial}{\partial\theta}(\sin\theta\sigma_{11})
     fReal halfStep = 0.5 * gridLenGlobal;    
@@ -962,28 +994,31 @@ __global__ void applyforcevelthetaKernel
     fReal psspy = invGridLenGlobal * (sigma11South * sinSouth - sigma11North * sinNorth);
     
     // pspx = \frac{\partial\sigma_{12}}{\partial\phi}
-    fReal pspx = invRadiusGlobal * (cscTheta * pvpxx + pupxy - cotTheta * pupx);
+    fReal pspx = cscTheta * pvpxx + pupxy - cotTheta * pupx;
 
     // pGpy = \frac{\partial\Gamma}{\partial\theta};
     fReal pGpy = invGridLenGlobal * (GammaSouth - GammaNorth);
 
     // force terms
-    fReal f1 = uPhi * uPhi * cotTheta * invRadiusGlobal;
-    fReal f2 = reGlobal * invRadiusGlobal * cscTheta * invDelta * pDpx * sigma12;
-    fReal f3 = -2 * MGlobal * invDelta * invRadiusGlobal * pGpy;
-    fReal f4 = reGlobal * invDelta * invRadiusGlobal * pDpy * 2 * (div + invRadiusGlobal * pvpy);
-    fReal f5 = reGlobal * invRadiusGlobal * cscTheta * (psspy + pspx - cosTheta * sigma22);
-
-    // fReal f7 = gGlobal * sinTheta;
-    fReal f7 = 0.0; 		// Van der Waals
+    fReal f1 = uPhi * uPhi * cotTheta;
+    fReal f2 = reGlobal * cscTheta * invDelta * pDpx * sigma12;
+    fReal f3 = -2 * MGlobal * invDelta * pGpy;
+    fReal f4 = reGlobal * invDelta * pDpy * 2 * (div + pvpy);
+    fReal f5 = reGlobal * cscTheta * (psspy + pspx - cosTheta * sigma22);
+    
+# ifdef gravity
+    fReal f7 = gGlobal * sinTheta;
+# else
+    fReal f7 = 0.0;
+# endif
     fReal vAir = 0.0;
     fReal f6 = CrGlobal * (vAir - v1);
     
     // output
     fReal result = (v1 + timeStepGlobal * (f1 + f2 + f3 + f4 + f5 + CrGlobal * vAir + f7))
 	/ (1.0 + CrGlobal * timeStepGlobal);
-    if (fabsf(result) < eps)
-	result = 0.f;
+    // if (fabsf(result) < eps)
+    // 	result = 0.f;
     velThetaOutput[thetaId * pitch + phiId] = result;
 }
 
@@ -1048,25 +1083,36 @@ __global__ void applyforcevelphiNoViscosityKernel
     
     // pGpx = \frac{\partial\Gamma}{\partial\phi};
     fReal pGpx = invGridLenGlobal * (GammaEast - GammaWest);
-
+    
+#ifdef sphere
     // trigonometric function
     fReal sinTheta = sinf(gTheta);
     fReal cscTheta = 1. / sinTheta;
     fReal cosTheta = cosf(gTheta);
     fReal cotTheta = cosTheta * cscTheta;
-    
-    // force terms
-    fReal f1 = -vTheta * u1 * cotTheta * invRadiusGlobal;
-    fReal f3 = -2 * MGlobal * invDelta * invRadiusGlobal * cscTheta * pGpx;
+
+    // force terms    
+    fReal f3 = -2 * MGlobal * invDelta * cscTheta * pGpx;
+#else
+    fReal f3 = -2 * MGlobal * invDelta * pGpx;
+#endif
 
     fReal uAir = 0.0;
+# ifdef air
     if (currentTimeGlobal < 5)
-	uAir = 20.f * (M_hPI - gTheta) * expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal * cosf(gPhi) / UGlobal;
+    	uAir = 20.f * (M_hPI - gTheta) * expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal * cosf(gPhi) / UGlobal;
+# endif
     fReal f6 = uAir - u1;
 
     // output
+# ifdef sphere
     velPhiOutput[thetaId * pitch + phiId] = (u1 + timeStepGlobal * (f3 + CrGlobal * uAir))
-	/ (1.0 + (CrGlobal + vTheta * invRadiusGlobal * cotTheta) * timeStepGlobal);
+	/ (1.0 + (CrGlobal + vTheta * cotTheta) * timeStepGlobal);
+# else
+    velPhiOutput[thetaId * pitch + phiId] = (u1 + timeStepGlobal * (f3 + CrGlobal * uAir))
+	/ (1.0 + CrGlobal * timeStepGlobal);
+# endif
+
 }
 
 
@@ -1175,7 +1221,7 @@ __global__ void applyforcevelphiKernel
     
     // stress
     // TODO: laplace term
-    fReal sigma12 = invRadiusGlobal * (cscTheta * pvpx + pupy - u1 * cotTheta);
+    fReal sigma12 = cscTheta * pvpx + pupy - u1 * cotTheta;
 
     // pDpx = \frac{\partial\Delta}{\partial\phi}
     fReal pDpx = invGridLenGlobal * (DeltaEast - DeltaWest);
@@ -1214,34 +1260,36 @@ __global__ void applyforcevelphiKernel
     // TODO: uncertain about the definintion of u_\phi at both poles
     fReal uNorth = 0.5 * (u3 + u1);
     fReal uSouth = 0.5 * (u1 + u4);
-    fReal psspy = invRadiusGlobal * invGridLenGlobal * (invGridLenGlobal * (v0 + v3 - v1 - v2) +
+    fReal psspy = invGridLenGlobal * (invGridLenGlobal * (v0 + v3 - v1 - v2) +
 							sinSouth * pupySouth - sinNorth * pupyNorth -
 							cosSouth * uSouth + cosNorth * uNorth);
     
     // pspx = \frac{\partial\sigma_{22}}{\partial\phi}
-    fReal sigma22West = 2 * (2 * divWest - invRadiusGlobal * pvpyWest);
-    fReal sigma22East = 2 * (2 * divEast - invRadiusGlobal * pvpyEast);
+    fReal sigma22West = 2 * (2 * divWest - pvpyWest);
+    fReal sigma22East = 2 * (2 * divEast - pvpyEast);
     fReal pspx = invGridLenGlobal * (sigma22East - sigma22West);
     
     // force terms
-    // fReal f1 = -vTheta * u1 * cotTheta * invRadiusGlobal;
-    fReal f2 = reGlobal * invRadiusGlobal * invDelta * pDpy * sigma12;
-    fReal f3 = -2 * MGlobal * invDelta * invRadiusGlobal * cscTheta * pGpx;
-    fReal f4 = reGlobal * invDelta * invRadiusGlobal * cscTheta * pDpx * 2 * ( 2 * div - invRadiusGlobal * pvpy);
-    fReal f5 = reGlobal * invRadiusGlobal * cscTheta * (psspy + pspx + cosTheta * sigma12);
+    // fReal f1 = -vTheta * u1 * cotTheta;
+    fReal f2 = reGlobal * invDelta * pDpy * sigma12;
+    fReal f3 = -2 * MGlobal * invDelta * cscTheta * pGpx;
+    fReal f4 = reGlobal * invDelta * cscTheta * pDpx * 2 * ( 2 * div - pvpy);
+    fReal f5 = reGlobal * cscTheta * (psspy + pspx + cosTheta * sigma12);
 
     // fReal f7 = 0.0; 		// Van der Waals
     fReal uAir = 0.0;
+# ifdef air
     if (currentTimeGlobal < 5)
-	uAir = 20.f * (M_hPI - gTheta) * expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal * cosf(gPhi) / UGlobal;
+    	uAir = 20.f * (M_hPI - gTheta) * expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal * cosf(gPhi) / UGlobal;
+# endif
 
     fReal f6 = CrGlobal * (uAir - u1);
     
     // output
     fReal result = (u1 + timeStepGlobal * (f2 + f3 + f4 + f5 + CrGlobal * uAir))
-	/ (1.0 + (CrGlobal + vTheta * invRadiusGlobal * cotTheta) * timeStepGlobal);
-    if (fabsf(result) < eps)
-	result = 0.f;
+	/ (1.0 + (CrGlobal + vTheta * cotTheta) * timeStepGlobal);
+    // if (fabsf(result) < eps)
+    // 	result = 0.f;
     velPhiOutput[thetaId * pitch + phiId] = result;
 }
 
@@ -1310,7 +1358,7 @@ __global__ void mapParticlesToThickness
 
 	fReal theta = (thetaId + 0.5) * gridLenGlobal;
 
-	fReal phiRange = 0.5/sinTheta;
+	fReal phiRange = .5f/sinTheta;
 	int minPhiId = static_cast<int>(ceilf(gPhiId - phiRange));
 	int maxPhiId = static_cast<int>(floorf(gPhiId + phiRange));
 
@@ -1368,10 +1416,13 @@ __global__ void normalizeThickness
 	// Sample the speed
 	fReal guPhi = sampleVPhi(velPhi, gPhiId, gThetaId, pitch);
 	fReal guTheta = sampleVTheta(velTheta, gPhiId, gThetaId, pitch);
-    
-	fReal cofTheta = timeStepGlobal * invRadiusGlobal * invGridLenGlobal;
-	fReal sinTheta = max(sinf(gTheta), eps);
-	fReal cofPhi = cofTheta / sinTheta;
+
+	fReal cofTheta = timeStepGlobal * invGridLenGlobal;
+# ifdef sphere
+	fReal cofPhi = cofTheta / sinf(gTheta);
+# else
+	fReal cofPhi = cofTheta;
+# endif
 
 	fReal deltaPhi = guPhi * cofPhi;
 	fReal deltaTheta = guTheta * cofTheta;
@@ -1406,7 +1457,15 @@ __global__ void applyforceSurfConcentration
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
-	
+
+    fReal thetaCoord = ((fReal)thetaId + centeredThetaOffset) * gridLenGlobal;
+    
+    fReal halfStep = 0.5 * gridLenGlobal;
+
+    fReal cscTheta = 1.f / sinf(thetaCoord);
+    fReal sinThetaSouth = sinf(thetaCoord + halfStep);
+    fReal sinThetaNorth = sinf(thetaCoord - halfStep);
+
     fReal gamma = sConcentrationInput[thetaId * pitch + phiId];
     fReal gammaWest = sConcentrationInput[thetaId * pitch + (phiId - 1 + nPhiGlobal) % nPhiGlobal];
     fReal gammaEast = sConcentrationInput[thetaId * pitch + (phiId + 1) % nPhiGlobal];
@@ -1424,11 +1483,18 @@ __global__ void applyforceSurfConcentration
     	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
     	gammaSouth = sConcentrationInput[thetaId * pitch + oppositePhiId];
     }
-    fReal laplace = invGridLenGlobal * invGridLenGlobal *
+# ifdef sphere
+    fReal laplace = invGridLenGlobal * invGridLenGlobal * cscTheta *
+	(sinThetaSouth * (gammaSouth - gamma) - sinThetaNorth * (gamma - gammaNorth) +
+		    cscTheta * (gammaEast + gammaWest - 2 * gamma));
+# else
+    fReal laplace = invGridLenGlobal * invGridLenGlobal * 
     	(gammaWest - 4*gamma + gammaEast + gammaNorth + gammaSouth);
+#endif
     
     fReal f = div[thetaId * nPhiGlobal + phiId];
     fReal f2 = DsGlobal * laplace;
+    // fReal f2 = 0.f;
 
     sConcentrationOutput[thetaId * pitch + phiId] = max((gamma + f2 * timeStepGlobal) / (1 + timeStepGlobal * f), 0.f);
 }
@@ -1439,7 +1505,7 @@ void KaminoSolver::bodyforce()
     dim3 gridLayout;
     dim3 blockLayout;
 
-    bool noVis = false;
+    bool noVis = true;
     for (int i = 0; i < 3; i++) {
     	determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
 
@@ -1816,11 +1882,11 @@ Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
 	       std::string thicknessPath, std::string velocityPath,
 	       std::string thicknessImage, size_t particleDensity, int device):
     radius(radius), invRadius(1/radius), H(H), U(U), c_m(c_m), Gamma_m(Gamma_m), T(T),
-    Ds(Ds), gs(g/(U*U)), rm(rm), epsilon(H), sigma_r(R*T), M(Gamma_m*R*T/(3*rho*H*U*U)),
-    S(sigma_a*H/(2*mu*U)), re(mu/(rho*U)), Cr(rhoa*sqrt(mua)/(rho*U*H)),
+    Ds(Ds*U*radius), gs(g*radius/(U*U)), rm(rm), epsilon(H/radius), sigma_r(R*T), M(Gamma_m*sigma_r/(3*rho*H*U*U)),
+    S(sigma_a*epsilon/(2*mu*U)), re(mu/(U*radius*rho)), Cr(rhoa*sqrt(mua)*radius/(rho*U*H)),
     nTheta(nTheta), nPhi(2 * nTheta),
     gridLen(M_PI / nTheta), invGridLen(nTheta / M_PI), 
-    dt(dt), DT(DT), frames(frames),
+    dt(dt*U/radius), DT(DT), frames(frames),
     A(A), B(B), C(C), D(D), E(E),
     thicknessPath(thicknessPath), velocityPath(velocityPath),
     thicknessImage(thicknessImage), particleDensity(particleDensity), device(device)
@@ -1872,6 +1938,7 @@ void Kamino::run()
 
     float T = 0.0;              // simulation time
     int i = 1;
+    float dt_ = dt * this->radius / this->U;
     for (; i < frames; i++) {
 	checkCudaErrors(cudaMemcpyToSymbol(currentTimeGlobal, &T, sizeof(fReal)));
 	std::cout << "current time " << T << std::endl;
@@ -1880,12 +1947,12 @@ void Kamino::run()
 	//dt = 0.0005;
 
 	checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &dt, sizeof(fReal)));
-	std::cout << "current time step size is " << dt << " s" << std::endl;
-	std::cout << "steps needed until next frame " << DT/dt*U << std::endl;
+	std::cout << "current time step size is " << dt_ << " s" << std::endl;
+	std::cout << "steps needed until next frame " << DT/dt_ << std::endl;
     
-	while ((T + dt/this->U) <= i*DT && !solver.isBroken()) {
+	while ((T + dt_) <= i*DT && !solver.isBroken()) {
 	    solver.stepForward();
-	    T += dt/this->U;
+	    T += dt_;
 	}
 	if (T < i*DT) {
 	    solver.stepForward(i*DT - T);

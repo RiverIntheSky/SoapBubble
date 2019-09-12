@@ -616,7 +616,7 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
     for (size_t j = 0; j < nTheta; ++j) {
 	for (size_t i = 0; i < nPhi; ++i) {
 	    fReal uW = velPhi->getCPUValueAt(i, j);
-	    ofu << uW << " ";
+	    // ofu << uW << " ";
 	    fReal uE;
 	    fReal vN;
 	    fReal vS;
@@ -634,14 +634,16 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
 	    }
 	    if (j != nTheta - 1) {
 		vS = velTheta->getCPUValueAt(i, j);
-		ofv << vS << " ";
+		// ofv << vS << " ";
 	    } else {
 		size_t oppositei = (i + nPhi/2) % nPhi;
 		vS = 0.75 * velTheta->getCPUValueAt(i, j - 1) -
 		    0.25 * velTheta->getCPUValueAt(oppositei, j - 1);
 	    }
 	    fReal u = 0.5 * (uW + uE);
+	    ofu << u << " ";
 	    fReal v = 0.5 * (vN + vS);
+	    ofv << v << " ";
 	    if (u > maxu) {
 		maxu = u;
 		maxuthetaid = j;
@@ -842,7 +844,7 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
     std::ofstream of(mat_string);
 
     //    if (frame != 0) {
-    if (true) {
+    if (false) {
 	dim3 gridLayout;
 	dim3 blockLayout;
 	determineLayout(gridLayout, blockLayout, rows, cols);
@@ -877,10 +879,10 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 		    this->setBroken(true);
 		    return;
 		} else {
-		    images[0][j * cols + i] = Delta * this->H * 5e5;
-		    images[1][j * cols + i] = Delta * this->H * 5e5;
-		    images[2][j * cols + i] = Delta * this->H * 5e5;
-		    of << Delta << " ";
+		    images[0][j * cols + i] = Delta * this->H * 2e5;
+		    images[1][j * cols + i] = Delta * this->H * 2e5;
+		    images[2][j * cols + i] = Delta * this->H * 2e5;
+		    of << Delta * this->H << " ";
 		}
 	    }
 	    of << std::endl;
@@ -902,10 +904,10 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 		    this->setBroken(true);
 		}    //		    return;
 		//} else {
-		images[0][j*nPhi+i] = Delta * this->H * 5e5;
-		images[1][j*nPhi+i] = Delta * this->H * 5e5;
-		images[2][j*nPhi+i] = Delta * this->H * 5e5;
-		of << Delta << " ";
+		images[0][j*nPhi+i] = Delta * this->H * 2e5;
+		images[1][j*nPhi+i] = Delta * this->H * 2e5;
+		images[2][j*nPhi+i] = Delta * this->H * 2e5;
+		of << Delta * this->H << " ";
 		//}
 	    }
 	    of << std::endl;
