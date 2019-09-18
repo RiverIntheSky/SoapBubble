@@ -3,12 +3,41 @@
 # include "../include/KaminoQuantity.cuh"
 # include "../include/KaminoParticles.cuh"
 
+#define CHECK_CUDA(func)						\
+    {									\
+	cudaError_t status = (func);					\
+	if (status != cudaSuccess) {					\
+	    printf("CUDA API failed at line %d with error: %s (%d)\n",	\
+		   __LINE__, cudaGetErrorString(status), status);	\
+	}								\
+    }
+
+
+#define CHECK_CUSPARSE(func)						\
+    {									\
+	cusparseStatus_t status = (func);				\
+	if (status != CUSPARSE_STATUS_SUCCESS) {			\
+	    printf("CUSPARSE API failed at line %d with error: %s (%d)\n", \
+		   __LINE__, cusparseGetErrorString(status), status);	\
+	}								\
+    }
+
+
+// TODO
+#define CHECK_CUBLAS(func)						\
+    {									\
+ 	cublasStatus_t status = (func);					\
+	checkCudaErrors(status);					\
+    }
+
+
 extern __constant__ fReal invGridLenGlobal;
 
 __device__ bool validateCoord(fReal& phi, fReal& theta, size_t& nPhi);
 __device__ fReal kaminoLerp(fReal from, fReal to, fReal alpha);
 __device__ fReal sampleCentered(fReal* input, fReal phiRawId, fReal thetaRawId, size_t pitch);
 __global__ void resetThickness(float2* weight);
+__global__ void initLinearSystem(int* row_ptr, int* col_ind);
 
 class KaminoSolver
 {
@@ -31,9 +60,13 @@ private:
     fReal* gpuFImag;
     fReal* gpuFZeroComponent;
     
-    // Buffer for elements that can be precomputed
+    // Buffer for elements that can be preallocated
     fReal* div;
     float2* weight;
+    int* row_ptr;
+    int* col_ind;
+    float* rhs;
+    float* val;
 
     // original resolution
     float2* weightFull;
@@ -71,7 +104,25 @@ private:
     /* harmonic coefficients for velocity field initializaton */
     fReal A;
     int B, C, D, E;
+
+    /* average film thickness */
     fReal H;
+    /* expansion parameter */
+    float epsilon;
+
+    /* cuSPARSE and cuBLAS*/
+    int N;
+    int nz;
+    cublasHandle_t cublasHandle;
+    cusparseHandle_t cusparseHandle;
+    cusparseDnVecDescr_t vecR, vecX, vecP, vecO;
+
+    float zero = 0.f;
+    float one = 1.f;
+    float minusone = -1.f;
+    float r0, r1, beta, alpha, nalpha, dot;
+
+    float *d_r, *d_p, *d_omega, *d_x;
 
     /* So that it remembers all these attributes within */
     //std::map<std::string, KaminoQuantity*> centeredAttr;
@@ -105,6 +156,8 @@ private:
     void geometric();
     void bodyforce();
     void projection();
+    //    void conjugateGradientPreconditioned(int N, int nz);
+    void conjugateGradient();
 
     // Swap all these buffers of the attributes.
     void swapVelocityBuffers();
@@ -141,11 +194,13 @@ public:
     bool isBroken();
     void setBroken(bool broken);
 
+    /* help functions */
     void write_thickness_img(const std::string& s, const int frame);
     // void write_data_bgeo(const std::string& s, const int frame);
     void write_image(const std::string& s, size_t width, size_t height, std::vector<float> *images);
     void write_velocity_image(const std::string& s, const int frame);
     void write_concentration_image(const std::string& s, const int frame);
+    void printGPUarray(std::string repr, float* vec, int& len);
 
     KaminoParticles* particles;
 };

@@ -51,6 +51,8 @@ target_link_libraries(kamino
   partio
   z
   cudart
+  cusparse
+  cublas
   cudadevrt
   cufft
   )

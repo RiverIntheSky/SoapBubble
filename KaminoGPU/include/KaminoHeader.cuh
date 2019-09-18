@@ -8,20 +8,16 @@
 
 # include "Partio.h"
 
+// Using updated (v2) interfaces for CUBLAS and CUSPARSE
+# include <cusparse.h>
+# include <cublas_v2.h>
+
 # include "cuda_runtime.h"
 # include "helper_functions.h"
 # include "device_launch_parameters.h"
 # include "helper_cuda.h"
 # include "cufft.h"
 # include "vectorUtil.cuh"
-
-//# include <Eigen/Eigen>
-
-//# define OMParallelize
-# ifdef OMParallelize
-# include <omp.h>
-# define TOTALThreads 16
-# endif
 
 # define M_PI           3.14159265358979323846  /* pi */
 # define M_2PI			6.28318530717958647692  /* 2pi */
@@ -72,5 +68,5 @@ enum Coord { phi, theta };
 # define PERFORMANCE_BENCHMARK
 # define TINYEXR_IMPLEMENTATION
 // # define sphere
-// # define gravity
-# define air
+# define gravity
+// # define air
