@@ -89,11 +89,12 @@ __global__ void initParticleValues(fReal* particleVal, fReal* particleCoord, fRe
 }
 
 
-__global__ void initLinearSystem(int* row_ptr, int* col_ind) {
+__global__ void initLinearSystem(int* row_ptr, int* col_ind, int* row_ptrm, int* col_indm, float* valm) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     
     int idx5 = 5 * idx;
     row_ptr[idx] = idx5;
+    row_ptrm[idx] = idx;
     
     if (idx < nPhiGlobal * nThetaGlobal) {
 	// up
@@ -122,6 +123,8 @@ __global__ void initLinearSystem(int* row_ptr, int* col_ind) {
 	} else {
 	    col_ind[idx5 + 4] = idx + nPhiGlobal;
 	}
+	col_indm[idx] = idx;
+	valm[idx] = 1.f; /* identity matrix */
     }
 }
 
@@ -137,9 +140,9 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     checkCudaErrors(cudaSetDevice(device));
 
     cudaDeviceProp deviceProp;
-    checkCudaErrors(cudaGetDeviceProperties(&deviceProp, 0));
+    checkCudaErrors(cudaGetDeviceProperties(&deviceProp, device));
     this->nThreadxMax = min(deviceProp.maxThreadsDim[0], 128);
-
+    
     checkCudaErrors(cudaMalloc((void **)&gpuUFourier,
 			       sizeof(ComplexFourier) * N));
     checkCudaErrors(cudaMalloc((void **)&gpuUReal,
@@ -163,11 +166,17 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     checkCudaErrors(cudaMalloc((void **)(&row_ptr),
 			       sizeof(int) * (N + 1)));
     checkCudaErrors(cudaMalloc((void **)(&col_ind),
-			       sizeof(int) * 5 * N));
+			       sizeof(int) * nz));
     checkCudaErrors(cudaMalloc((void **)(&rhs),
 			       sizeof(float) * N));
     checkCudaErrors(cudaMalloc((void **)(&val),
 			       sizeof(float) * nz));
+    checkCudaErrors(cudaMalloc((void **)(&row_ptrm),
+			       sizeof(int) * (N + 1)));
+    checkCudaErrors(cudaMalloc((void **)(&col_indm),
+			       sizeof(int) * N));
+    checkCudaErrors(cudaMalloc((void **)(&valm),
+			       sizeof(float) * N));
     
     checkCudaErrors(cudaMalloc((void **)(&gpuA),
 			       sizeof(fReal) * N));
@@ -201,11 +210,14 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 
     dim3 gridLayout;
     dim3 blockLayout;
-
+			        
     determineLayout(gridLayout, blockLayout, 1, N + 1);
-    initLinearSystem<<<gridLayout, blockLayout>>>(row_ptr, col_ind);
+    initLinearSystem<<<gridLayout, blockLayout>>>(row_ptr, col_ind, row_ptrm, col_indm, valm);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
+    
+    // printGPUarraytoMATLAB<int>("test/row_ptr.txt", row_ptr, N + 1, 1);
+    // printGPUarraytoMATLAB<int>("test/col_ind.txt", col_ind, N, 5);
     
     // cuSPARSE and cuBLAS
     CHECK_CUBLAS(cublasCreate(&cublasHandle));
@@ -217,7 +229,12 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     CHECK_CUDA(cudaMalloc((void**)&d_p, N * sizeof(float)));
     CHECK_CUDA(cudaMalloc((void**)&d_omega, N * sizeof(float)));   
 	
-    // Create dense vectors
+    // Create preconditioner and dense vectors
+    CHECK_CUSPARSE(cusparseCreateCsr(&matM, N, N, N, row_ptrm, col_indm,
+    				     valm, CUSPARSE_INDEX_32I,
+    				     CUSPARSE_INDEX_32I,
+    				     CUSPARSE_INDEX_BASE_ZERO,
+    				     CUDA_R_32F));
     CHECK_CUSPARSE(cusparseCreateDnVec(&vecX, N, d_x, CUDA_R_32F));
     CHECK_CUSPARSE(cusparseCreateDnVec(&vecR, N, d_r, CUDA_R_32F));
     CHECK_CUSPARSE(cusparseCreateDnVec(&vecP, N, d_p, CUDA_R_32F));
@@ -244,10 +261,6 @@ KaminoSolver::~KaminoSolver()
 
     checkCudaErrors(cudaFree(div));
     checkCudaErrors(cudaFree(weight));
-    checkCudaErrors(cudaFree(row_ptr));
-    checkCudaErrors(cudaFree(col_ind));
-    checkCudaErrors(cudaFree(rhs));
-    checkCudaErrors(cudaFree(val));
 
     checkCudaErrors(cudaFree(thicknessFull));
     checkCudaErrors(cudaFree(weightFull));
@@ -256,6 +269,7 @@ KaminoSolver::~KaminoSolver()
     checkCudaErrors(cudaFree(gpuB));
     checkCudaErrors(cudaFree(gpuC));
 
+    CHECK_CUSPARSE(cusparseDestroySpMat(matM));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecX));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecR));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecP));
@@ -267,6 +281,13 @@ KaminoSolver::~KaminoSolver()
     CHECK_CUDA(cudaFree(d_x));
     CHECK_CUDA(cudaFree(d_p));
     CHECK_CUDA(cudaFree(d_omega));
+    CHECK_CUDA(cudaFree(row_ptr));
+    CHECK_CUDA(cudaFree(col_ind));
+    CHECK_CUDA(cudaFree(rhs));
+    CHECK_CUDA(cudaFree(val));
+    CHECK_CUDA(cudaFree(row_ptrm));
+    CHECK_CUDA(cudaFree(col_indm));
+    CHECK_CUDA(cudaFree(valm));
 
     delete this->velPhi;
     delete this->velTheta;

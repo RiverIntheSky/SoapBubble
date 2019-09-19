@@ -63,10 +63,6 @@ private:
     // Buffer for elements that can be preallocated
     fReal* div;
     float2* weight;
-    int* row_ptr;
-    int* col_ind;
-    float* rhs;
-    float* val;
 
     // original resolution
     float2* weightFull;
@@ -99,7 +95,7 @@ private:
     /* Inverted grid size*/
     fReal invGridLen;
     /* Whether film is broken */
-    bool broken;
+    bool broken = false;
 
     /* harmonic coefficients for velocity field initializaton */
     fReal A;
@@ -117,12 +113,16 @@ private:
     cusparseHandle_t cusparseHandle;
     cusparseDnVecDescr_t vecR, vecX, vecP, vecO;
 
-    float zero = 0.f;
-    float one = 1.f;
-    float minusone = -1.f;
+    const float zero = 0.f;
+    const float one = 1.f;
+    const float minusone = -1.f;
     float r0, r1, beta, alpha, nalpha, dot;
 
     float *d_r, *d_p, *d_omega, *d_x;
+    int *row_ptr, *col_ind, *row_ptrm, *col_indm;
+    float *rhs, *val, *valm;
+
+    cusparseSpMatDescr_t matM; /* pre-conditioner */
 
     /* So that it remembers all these attributes within */
     //std::map<std::string, KaminoQuantity*> centeredAttr;
@@ -156,7 +156,6 @@ private:
     void geometric();
     void bodyforce();
     void projection();
-    //    void conjugateGradientPreconditioned(int N, int nz);
     void conjugateGradient();
 
     // Swap all these buffers of the attributes.
@@ -200,7 +199,39 @@ public:
     void write_image(const std::string& s, size_t width, size_t height, std::vector<float> *images);
     void write_velocity_image(const std::string& s, const int frame);
     void write_concentration_image(const std::string& s, const int frame);
-    void printGPUarray(std::string repr, float* vec, int& len);
+    template <typename T>
+    void printGPUarray(std::string repr, T* vec, int len);
+    template <typename T>
+    void printGPUarraytoMATLAB(std::string filename, T* vec, int num_row, int num_col);
 
     KaminoParticles* particles;
 };
+
+
+template <typename T>
+void KaminoSolver::printGPUarray(std::string repr, T* vec, int len) {
+    T cpuvec[len];
+    CHECK_CUDA(cudaMemcpy(cpuvec, vec, len * sizeof(T),
+			  cudaMemcpyDeviceToHost));
+    std::cout << repr << std::endl;
+    for (int i = 0; i < len; i++)
+	std::cout << cpuvec[i] << " ";
+    std::cout << std::endl;
+}
+
+
+template <typename T>
+void KaminoSolver::printGPUarraytoMATLAB(std::string filename, T* vec, int num_row,
+					 int num_col) {
+    std::ofstream of(filename);
+    int len = num_row * num_col;
+    T cpuvec[len];
+    CHECK_CUDA(cudaMemcpy(cpuvec, vec, len * sizeof(T),
+			  cudaMemcpyDeviceToHost));
+    for (int row = 0; row < num_row; row++) {
+	for (int col = 0; col < num_col; col++) {
+	    of << cpuvec[row * num_col + col] << " ";
+	}
+	of << "\n";
+    }
+}

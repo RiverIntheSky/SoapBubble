@@ -21,17 +21,6 @@ static __constant__ fReal UGlobal;
 
 #define eps 1e-7f
 
-void KaminoSolver::printGPUarray(std::string repr, float* vec, int& len) {
-    float cpuvec[len];
-    CHECK_CUDA(cudaMemcpy(cpuvec, vec, len * sizeof(float),
-			  cudaMemcpyDeviceToHost));
-    std::cout << repr << std::endl;
-    for (int i = 0; i < len; i++)
-	std::cout << cpuvec[i] << " ";
-    std::cout << std::endl;
-}
-
-
 __device__ bool validateCoord(fReal& phi, fReal& theta, size_t& nPhi) {
     bool ret = false;
     // assume theta lies not too far away from the interval [0, nThetaGlobal],
@@ -693,19 +682,19 @@ void KaminoSolver::advection()
 	     particles->coordGPUThisStep, velPhi->getThisStepPitchInElements(), particles->numOfParticles);
 	checkCudaErrors(cudaGetLastError());
 	// checkCudaErrors(cudaDeviceSynchronize());
+
+	// advected thickness
+	determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+	resetThickness<<<gridLayout, blockLayout>>>(weight);
+	checkCudaErrors(cudaGetLastError());
+	// checkCudaErrors(cudaDeviceSynchronize());
+
+	determineLayout(gridLayout, blockLayout, 2, particles->numOfParticles);
+	mapParticlesToThickness<<<gridLayout, blockLayout>>>
+	    (particles->coordGPUThisStep, particles->value,  weight, particles->numOfParticles);
+	checkCudaErrors(cudaGetLastError());
+	checkCudaErrors(cudaDeviceSynchronize());
     }
-
-    // advected thickness
-    determineLayout(gridLayout, blockLayout, nTheta, nPhi);
-    resetThickness<<<gridLayout, blockLayout>>>(weight);
-    checkCudaErrors(cudaGetLastError());
-    // checkCudaErrors(cudaDeviceSynchronize());
-
-    determineLayout(gridLayout, blockLayout, 2, particles->numOfParticles);
-    mapParticlesToThickness<<<gridLayout, blockLayout>>>
-	(particles->coordGPUThisStep, particles->value,  weight, particles->numOfParticles);
-    checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
 
     determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
     normalizeThickness<<<gridLayout, blockLayout>>>
@@ -1002,7 +991,7 @@ __global__ void concentrationLinearSystemKernel
     	etaNorth = eta_a[(thetaId - 1) * pitch + phiId];
     } else {
     	int oppositePhiId = (phiId + nThetaGlobal) % nPhiGlobal;
-    	etaNorth = eta_a[thetaId * pitch + oppositePhiId];
+    	etaNorth = eta_a[oppositePhiId];
     }
     if (thetaId != nThetaGlobal - 1) {
     	etaSouth = eta_a[(thetaId + 1) * pitch + phiId];
@@ -1043,14 +1032,18 @@ __global__ void concentrationLinearSystemKernel
 
 
 void KaminoSolver::conjugateGradient() {
+    const int max_iter = 1000;
+    int k = 0;
     cusparseSpMatDescr_t matA;
-
-    void *dBuffer;
+    void *dBuffer = 0;
     size_t bufferSize;
+    const cusparseOperation_t trans = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-    CHECK_CUDA(cudaMemcpy(d_x, surfConcentration->getGPUThisStep(),
-			  N * sizeof(float),
-			  cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy2D(d_x, nPhi * sizeof(float), surfConcentration->getGPUThisStep(),
+			    surfConcentration->getThisStepPitchInElements() * sizeof(float),
+			    nPhi * sizeof(float), nTheta,
+			    cudaMemcpyDeviceToDevice));
+
     CHECK_CUDA(cudaMemcpy(d_r, rhs, N * sizeof(float),
 			  cudaMemcpyDeviceToDevice));
 
@@ -1061,58 +1054,34 @@ void KaminoSolver::conjugateGradient() {
     				     CUSPARSE_INDEX_BASE_ZERO,
     				     CUDA_R_32F));
 
+    // printGPUarraytoMATLAB<float>("test/val.txt", val, N, 5);
+    // printGPUarraytoMATLAB<float>("test/rhs.txt", rhs, N, 1);
+
     // r = b - Ax
-    CHECK_CUSPARSE(cusparseSpMV_bufferSize(
-					   cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+    CHECK_CUSPARSE(cusparseSpMV_bufferSize(cusparseHandle, trans,
 					   &minusone, matA, vecX, &one, vecR, CUDA_R_32F,
 					   CUSPARSE_CSRMV_ALG1, &bufferSize));
-    //    size_t* temp;
-    // CHECK_CUDA(cudaMalloc(&temp, sizeof(size_t)));
-    // CHECK_CUDA(cudaMemcpy(temp, &bufferSize, sizeof(size_t),
-    // 			  cudaMemcpyHostToDevice));
-    // std::cout << "1 " << bufferSize << std::endl;
-    
+
     CHECK_CUDA(cudaMalloc(&dBuffer, bufferSize));
 
-    // CHECK_CUDA(cudaMemcpy(temp, &bufferSize, sizeof(size_t),
-    // 			  cudaMemcpyHostToDevice));
-    // std::cout << "2 " << bufferSize << std::endl;
-    
+    CHECK_CUSPARSE(cusparseSpMV(cusparseHandle, trans,
+    				&minusone, matA, vecX, &one, vecR, CUDA_R_32F,
+    				CUSPARSE_CSRMV_ALG1, dBuffer));
 
-    CHECK_CUSPARSE(cusparseSpMV(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-				&minusone, matA, vecX, &one, vecR, CUDA_R_32F,
-				CUSPARSE_CSRMV_ALG1, dBuffer));
-
-    //     CHECK_CUDA(cudaMemcpy(temp, &bufferSize, sizeof(size_t),
-    // 			  cudaMemcpyHostToDevice));
-    // std::cout << "3 " << bufferSize << std::endl;
-
-    // rho_k = ||r||
     CHECK_CUBLAS(cublasSdot(cublasHandle, N, d_r, 1, d_r, 1, &r1));
 
-    int k = 0;
-    int max_iter = 1000;
-    //    std::cout << "mid " << std::endl;
-    while (r1 > epsilon*epsilon && k <= max_iter)
-    {
-	// printGPUarray("res", d_r, N);
-	// printf("  iteration = %3d, residual = %e \n", k, sqrt(r1));
-        k++;
-
-        if (k == 1)
-        {
-            cublasScopy(cublasHandle, N, d_r, 1, d_p, 1);
-        }
-        else
-        {
-            beta = r1/r0;
+    while (r1 > epsilon*epsilon && k <= max_iter) {
+	k++;
+        if (k == 1) {
+	    cublasScopy(cublasHandle, N, d_r, 1, d_p, 1);
+	} else {
+	    beta = r1/r0;
             cublasSscal(cublasHandle, N, &beta, d_p, 1);
-            cublasSaxpy(cublasHandle, N, &one, d_r, 1, d_p, 1) ;
-        }
-
-	CHECK_CUSPARSE(cusparseSpMV(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-				&one, matA, vecP, &zero, vecO, CUDA_R_32F,
-				CUSPARSE_CSRMV_ALG1, dBuffer));
+            cublasSaxpy(cublasHandle, N, &one, d_r, 1, d_p, 1);
+	}
+	CHECK_CUSPARSE(cusparseSpMV(cusparseHandle, trans,
+				    &one, matA, vecP, &zero, vecO, CUDA_R_32F,
+				    CUSPARSE_CSRMV_ALG1, dBuffer));
 
         cublasSdot(cublasHandle, N, d_p, 1, d_omega, 1, &dot);
         alpha = r1/dot;
@@ -1122,17 +1091,15 @@ void KaminoSolver::conjugateGradient() {
         r0 = r1;
         cublasSdot(cublasHandle, N, d_r, 1, d_r, 1, &r1);	
     }
-
     printf("  iteration = %3d, residual = %e \n", k, sqrt(r1));
-    cudaMemcpy(surfConcentration->getGPUNextStep(), d_x, N * sizeof(float), cudaMemcpyDeviceToDevice);
-
-
-    // destroy matrix descriptor
-    CHECK_CUSPARSE(cusparseDestroySpMat(matA));
     
-    // device memory deallocation
+    CHECK_CUDA(cudaMemcpy2D(surfConcentration->getGPUNextStep(),
+			    surfConcentration->getNextStepPitchInElements() * sizeof(float),
+			    d_x, nPhi * sizeof(float), nPhi * sizeof(float), nTheta,
+			    cudaMemcpyDeviceToDevice));
+    
+    CHECK_CUSPARSE(cusparseDestroySpMat(matA));    
     CHECK_CUDA(cudaFree(dBuffer));
-    //    CHECK_CUDA(cudaFree(temp));
 }
 
 
@@ -1796,11 +1763,8 @@ void KaminoSolver::bodyforce()
     	(div, surfConcentration->getGPUThisStep(), thickness->getGPUThisStep(), val, rhs, thickness->getThisStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
-    //printGPUarray("rhs", rhs, N);
-    //printGPUarray("gamma", surfConcentration->getGPUThisStep(), N);
 
     // // this solves for surfConcentration->getGPUNextstep()
-    // //    conjugateGradientPreconditioned(nTheta*nPhi, nTheta*nPhi*5);
     conjugateGradient();
 
     applyforcevelthetaKernel_n<<<gridLayout, blockLayout>>>
