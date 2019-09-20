@@ -95,6 +95,8 @@ __global__ void initLinearSystem(int* row_ptr, int* col_ind, int* row_ptrm, int*
     int idx5 = 5 * idx;
     row_ptr[idx] = idx5;
     row_ptrm[idx] = idx;
+
+    int n = nPhiGlobal * nThetaGlobal;
     
     if (idx < nPhiGlobal * nThetaGlobal) {
 	// up
@@ -132,7 +134,7 @@ __global__ void initLinearSystem(int* row_ptr, int* col_ind, int* row_ptrm, int*
 KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
 			   fReal A, int B, int C, int D, int E, fReal H, int device) :
     nPhi(nPhi), nTheta(nTheta), radius(radius), invRadius(1.0/radius), gridLen(M_2PI / nPhi), invGridLen(1.0 / gridLen), frameDuration(frameDuration),
-    timeStep(0.0), timeElapsed(0.0), advectionTime(0.0), geometricTime(0.0), projectionTime(0.0),
+    timeStep(0.0), timeElapsed(0.0), advectionTime(0.0), bodyforceTime(0.0), CGTime(0.0),
     A(A), B(B), C(C), D(D), E(E), H(H), epsilon(H/radius), N(nPhi*nTheta), nz(5*N)
 {
     /// FIXME: Should we detect and use device 0?
@@ -184,7 +186,9 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 			       sizeof(fReal) * N));
     checkCudaErrors(cudaMalloc((void **)(&gpuC),
 			       sizeof(fReal) * N));
-    precomputeABCCoef();
+
+    checkCudaErrors(cudaMemcpyToSymbol(nPhiGlobal, &(this->nPhi), sizeof(size_t)));
+    checkCudaErrors(cudaMemcpyToSymbol(nThetaGlobal, &(this->nTheta), sizeof(size_t)));
 
     this->velPhi = new KaminoQuantity("velPhi", nPhi, nTheta,
 				      vPhiPhiOffset, vPhiThetaOffset);
@@ -248,6 +252,7 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 					       CUFFT_C2C, nTheta));
 }
 
+
 KaminoSolver::~KaminoSolver()
 {
     checkCudaErrors(cudaFree(gpuUFourier));
@@ -310,6 +315,7 @@ KaminoSolver::~KaminoSolver()
     std::cout << "Total time used for body force : " << this->bodyforceTime << std::endl;
     std::cout << "Percentage of advection : " << advectionTime / totalTimeUsed * 100.0f << "%" << std::endl;
     std::cout << "Percentage of bodyforce : " << bodyforceTime / totalTimeUsed * 100.0f << "%" << std::endl;
+    std::cout << "Percentage of CG / bodyforce : " << CGTime / bodyforceTime * 100.0f << "%" << std::endl;
 # endif
 }
 
@@ -324,53 +330,6 @@ void KaminoSolver::copyDensity2GPU()
     density->copyToGPU();
 }
 
-__global__ void precomputeABCKernel
-(fReal* A, fReal* B, fReal* C)
-{
-    int splitVal = nThetaGlobal / blockDim.x;
-    int nIndex = blockIdx.x / splitVal;
-    int threadSequence = blockIdx.x % splitVal;
-
-    int i = threadIdx.x + threadSequence * blockDim.x;
-    int n = nIndex - nPhiGlobal / 2;
-
-    int index = nIndex * nThetaGlobal + i;
-    fReal thetaI = (i + centeredThetaOffset) * gridLenGlobal;
-
-    fReal cosThetaI = cosf(thetaI);
-    fReal sinThetaI = sinf(thetaI);
-
-    fReal valB = -2.0 / (gridLenGlobal * gridLenGlobal)
-	- n * n / (sinThetaI * sinThetaI);
-    fReal valA = 1.0 / (gridLenGlobal * gridLenGlobal)
-	- cosThetaI / 2.0 / gridLenGlobal / sinThetaI;
-    fReal valC = 1.0 / (gridLenGlobal * gridLenGlobal)
-	+ cosThetaI / 2.0 / gridLenGlobal / sinThetaI;
-    if (n != 0)
-	{
-	    if (i == 0)
-		{
-		    fReal coef = powf(-1.0, n);
-		    valB += valA;
-		    valA = 0.0;
-		}
-	    if (i == nThetaGlobal - 1)
-		{
-		    fReal coef = powf(-1.0, n);
-		    valB += valC;
-		    valC = 0.0;
-		}
-	}
-    else
-	{
-	    valA = 0.0;
-	    valB = 1.0;
-	    valC = 0.0;
-	}
-    A[index] = valA;
-    B[index] = valB;
-    C[index] = valC;
-}
 
 void KaminoSolver::determineLayout(dim3& gridLayout, dim3& blockLayout,
 				   size_t nTheta_row, size_t nPhi_col)
@@ -389,20 +348,6 @@ void KaminoSolver::determineLayout(dim3& gridLayout, dim3& blockLayout,
 	}
 }
 
-void KaminoSolver::precomputeABCCoef()
-{
-    checkCudaErrors(cudaMemcpyToSymbol(nPhiGlobal, &(this->nPhi), sizeof(size_t)));
-    checkCudaErrors(cudaMemcpyToSymbol(nThetaGlobal, &(this->nTheta), sizeof(size_t)));
-    checkCudaErrors(cudaMemcpyToSymbol(gridLenGlobal, &(this->gridLen), sizeof(fReal)));
-
-    dim3 gridLayout;
-    dim3 blockLayout;
-    determineLayout(gridLayout, blockLayout, nPhi, nTheta);
-    precomputeABCKernel<<<gridLayout, blockLayout>>>
-	(this->gpuA, this->gpuB, this->gpuC);
-    checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
-}
 
 void KaminoSolver::copyToCPU(KaminoQuantity* quantity, fReal* cpubuffer) {
     checkCudaErrors(cudaMemcpy2D((void*)cpubuffer, quantity->getNPhi() * sizeof(fReal),
@@ -411,6 +356,7 @@ void KaminoSolver::copyToCPU(KaminoQuantity* quantity, fReal* cpubuffer) {
 				 quantity->getNPhi() * sizeof(fReal), quantity->getNTheta(),
 				 cudaMemcpyDeviceToHost));
 }
+
 
 fReal KaminoSolver::maxAbsDifference(const fReal* A, const fReal* B, const size_t& size) {
     fReal res = 0.f;
@@ -421,6 +367,7 @@ fReal KaminoSolver::maxAbsDifference(const fReal* A, const fReal* B, const size_
     }
     return res;
 }
+
 
 void KaminoSolver::adjustStepSize(fReal& dt, const fReal& U, const fReal& epsilon) {
     copyVelocityBack2CPU();
@@ -507,10 +454,12 @@ void KaminoSolver::adjustStepSize(fReal& dt, const fReal& U, const fReal& epsilo
     delete[] gammaLarge;
 }
 
+
 void KaminoSolver::stepForward(fReal timeStep) {
     advection(timeStep);
     bodyforce();
 }
+
 
 void KaminoSolver::stepForward() {
     this->timeStep = timeStep;
@@ -519,6 +468,7 @@ void KaminoSolver::stepForward() {
     KaminoTimer timer;
     timer.startTimer();
 # endif
+
     advection();
 # ifdef PERFORMANCE_BENCHMARK
     this->advectionTime += timer.stopTimer() * 0.001f;
@@ -528,9 +478,9 @@ void KaminoSolver::stepForward() {
 # ifdef PERFORMANCE_BENCHMARK
     this->bodyforceTime += timer.stopTimer() * 0.001f;
 # endif
-
     this->timeElapsed += this->timeStep;
 }
+
 
 void KaminoSolver::swapVelocityBuffers()
 {
@@ -538,16 +488,19 @@ void KaminoSolver::swapVelocityBuffers()
     this->velTheta->swapGPUBuffer();
 }
 
+
 void KaminoSolver::copyVelocityBack2CPU()
 {
     this->velPhi->copyBackToCPU();
     this->velTheta->copyBackToCPU();
 }
 
+
 void KaminoSolver::copyDensityBack2CPU()
 {
     this->density->copyBackToCPU();
 }
+
 
 void KaminoSolver::initWithConst(KaminoQuantity* attrib, fReal val)
 {
@@ -559,13 +512,16 @@ void KaminoSolver::initWithConst(KaminoQuantity* attrib, fReal val)
     attrib->copyToGPU();
 }
 
+
 bool KaminoSolver::isBroken() {
     return this->broken;
 }
 
+
 void KaminoSolver::setBroken(bool broken) {
     this->broken = broken;
 }
+
 
 void KaminoSolver::initThicknessfromPic(std::string path, size_t particleDensity)
 {
@@ -630,10 +586,12 @@ void KaminoSolver::initThicknessfromPic(std::string path, size_t particleDensity
     }
 }
 
+
 void KaminoSolver::initParticlesfromPic(std::string path, size_t parPerGrid)
 {
     this->particles = new KaminoParticles(path, parPerGrid, gridLen, nTheta);
 }
+
 
 void KaminoSolver::write_image(const std::string& s, size_t width, size_t height, std::vector<float> *images) {
     const char *filename = s.c_str();
@@ -683,6 +641,7 @@ void KaminoSolver::write_image(const std::string& s, size_t width, size_t height
     free(header.pixel_types);
     free(header.requested_pixel_types);
 }
+
 
 void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
     std::string img_string = std::to_string(frame);
@@ -788,6 +747,7 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
     write_image(img_string, nPhi, nTheta, images);
 }
 
+
 void KaminoSolver::write_concentration_image(const std::string& s, const int frame) {
     std::string img_string = std::to_string(frame);
     while (img_string.length() < 4) {
@@ -821,6 +781,7 @@ void KaminoSolver::write_concentration_image(const std::string& s, const int fra
 
     write_image(img_string, nPhi, nTheta, images);
 } 
+
 
 __global__ void upsampleParticles
 (fReal* particleCoord, fReal* particleVal, float2* weight, size_t numParticles)
@@ -1020,145 +981,4 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 
 	write_image(img_string, nPhi, nTheta, images);
     }    
-}
-
-// void KaminoSolver::write_data_bgeo(const std::string& s, const int frame)
-// {
-//     std::string file = s + std::to_string(frame) + ".bgeo";
-//     std::cout << "Writing to: " << file << std::endl;
-
-//     Partio::ParticlesDataMutable* parts = Partio::create();
-//     Partio::ParticleAttribute pH, vH, densityVal;
-//     pH = parts->addAttribute("position", Partio::VECTOR, 3);
-//     vH = parts->addAttribute("v", Partio::VECTOR, 3);
-//     densityVal = parts->addAttribute("density", Partio::FLOAT, 1);
-
-//     vec3 pos;
-//     vec3 vel;
-
-//     size_t iWest, iEast, jNorth, jSouth;
-//     fReal uWest, uEast, vNorth, vSouth;
-
-//     velPhi->copyBackToCPU();
-//     velTheta->copyBackToCPU();
-//     density->copyBackToCPU();
-
-//     for (size_t j = 0; j < nTheta; ++j)
-// 	{
-// 	    for (size_t i = 0; i < nPhi; ++i)
-// 		{
-// 		    iWest = i;
-// 		    uWest = velPhi->getCPUValueAt(iWest, j);
-// 		    i == (nPhi - 1) ? iEast = 0 : iEast = i + 1;
-// 		    uEast = velPhi->getCPUValueAt(iEast, j);
-
-// 		    if (j == 0)
-// 			{
-// 			    jNorth = jSouth = 0;
-// 			}
-// 		    else if (j == nTheta - 1)
-// 			{
-// 			    jNorth = jSouth = nTheta - 2;
-// 			}
-// 		    else
-// 			{
-// 			    jNorth = j - 1;
-// 			    jSouth = j;
-// 			}
-// 		    vNorth = velTheta->getCPUValueAt(i, jNorth);
-// 		    vSouth = velTheta->getCPUValueAt(i, jSouth);
-
-// 		    fReal velocityPhi, velocityTheta;
-// 		    velocityPhi = (uWest + uEast) / 2.0;
-// 		    velocityTheta = (vNorth + vSouth) / 2.0;
-
-// 		    pos = vec3((i + centeredPhiOffset) * gridLen, (j + centeredThetaOffset) * gridLen, 0.0);
-// 		    vel = vec3(0.0, velocityTheta, velocityPhi);
-// 		    mapVToSphere(pos, vel);
-// 		    mapPToSphere(pos);
-
-// 		    float densityValuefloat = density->getCPUValueAt(i, j);
-
-// 		    int idx = parts->addParticle();
-// 		    float* p = parts->dataWrite<float>(pH, idx);
-// 		    float* v = parts->dataWrite<float>(vH, idx);
-// 		    float* d = parts->dataWrite<float>(densityVal, idx);
-			
-// 		    for (int k = 0; k < 3; ++k) 
-// 			{
-// 			    p[k] = pos[k];
-// 			    v[k] = vel[k];
-// 			}
-// 		    d[0] = densityValuefloat;
-// 		}
-// 	}
-
-//     Partio::write(file.c_str(), *parts);
-//     parts->release();
-// }
-
-// void KaminoSolver::write_particles_bgeo(const std::string& s, const int frame)
-// {
-//     std::string file = s + std::to_string(frame) + ".bgeo";
-//     std::cout << "Writing to: " << file << std::endl;
-
-//     Partio::ParticlesDataMutable* parts = Partio::create();
-//     Partio::ParticleAttribute pH, vH, colorVal;
-//     pH = parts->addAttribute("position", Partio::VECTOR, 3);
-//     vH = parts->addAttribute("v", Partio::VECTOR, 3);
-//     colorVal = parts->addAttribute("color", Partio::VECTOR, 3);
-
-//     vec3 pos;
-//     vec3 vel;
-//     vec3 col;
-
-//     this->particles->copyBack2CPU();
-
-//     for (size_t i = 0; i < particles->numOfParticles; ++i)
-// 	{
-// 	    pos = vec3(particles->coordCPUBuffer[2 * i],
-// 		       particles->coordCPUBuffer[2 * i + 1], 0.0);
-// 	    mapPToSphere(pos);
-
-// 	    col = vec3(particles->colorBGR[3 * i + 1],
-// 		       particles->colorBGR[3 * i + 2],
-// 		       particles->colorBGR[3 * i + 3]);
-
-// 	    int idx = parts->addParticle();
-// 	    float* p = parts->dataWrite<float>(pH, idx);
-// 	    float* v = parts->dataWrite<float>(vH, idx);
-// 	    float* c = parts->dataWrite<float>(colorVal, idx);
-	
-// 	    for (int k = 0; k < 3; ++k)
-// 		{
-// 		    p[k] = pos[k];
-// 		    v[k] = 0.0;
-// 		    c[k] = col[k];
-// 		}
-// 	}
-
-//     Partio::write(file.c_str(), *parts);
-//     parts->release();
-// }
-
-void KaminoSolver::mapPToSphere(vec3& pos) const
-{
-    float theta = pos[1];
-    float phi = pos[0];
-    pos[0] = radius * sin(theta) * cos(phi);
-    pos[2] = radius * sin(theta) * sin(phi);
-    pos[1] = radius * cos(theta);
-}
-
-void KaminoSolver::mapVToSphere(vec3& pos, vec3& vel) const
-{
-    float theta = pos[1];
-    float phi = pos[0];
-
-    float u_theta = vel[1];
-    float u_phi = vel[2];
-
-    vel[0] = cos(theta) * cos(phi) * u_theta - sin(phi) * u_phi;
-    vel[2] = cos(theta) * sin(phi) * u_theta + cos(phi) * u_phi;
-    vel[1] = -sin(theta) * u_theta;
 }

@@ -13,6 +13,7 @@ KaminoParticles::KaminoParticles(std::string path, size_t particleDensity, fReal
 	fReal u1 = static_cast <fReal> (rand()) / static_cast <fReal> (RAND_MAX);
 	fReal u2 = static_cast <fReal> (rand()) / static_cast <fReal> (RAND_MAX);
 	fReal phiId = u1 * nPhi;
+	//fReal thetaId = u2 * nTheta;
         fReal thetaId = acosf(1 - 2 * u2) * nTheta / M_PI;
 	coordCPUBuffer[2 * i] = phiId;
 	coordCPUBuffer[2 * i + 1] = thetaId;

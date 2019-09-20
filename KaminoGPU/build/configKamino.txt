@@ -19,4 +19,4 @@ thicknessSave test1/frame
 velocitySave  test1/vel
 thicknessInit ../init/thickness512.exr
 particleDensity 0
-gpu 1
+gpu 0

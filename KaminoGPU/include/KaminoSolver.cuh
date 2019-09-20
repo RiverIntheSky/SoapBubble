@@ -37,7 +37,6 @@ __device__ bool validateCoord(fReal& phi, fReal& theta, size_t& nPhi);
 __device__ fReal kaminoLerp(fReal from, fReal to, fReal alpha);
 __device__ fReal sampleCentered(fReal* input, fReal phiRawId, fReal thetaRawId, size_t pitch);
 __global__ void resetThickness(float2* weight);
-__global__ void initLinearSystem(int* row_ptr, int* col_ind);
 
 class KaminoSolver
 {
@@ -146,16 +145,13 @@ private:
     fReal timeElapsed;
 
     float advectionTime;
-    float geometricTime;
     float bodyforceTime;
-    float projectionTime;
+    float CGTime;
 
     /// Kernel calling from here
     void advection(fReal& timeStep);
     void advection();
-    void geometric();
     void bodyforce();
-    void projection();
     void conjugateGradient();
 
     // Swap all these buffers of the attributes.
@@ -163,9 +159,6 @@ private:
 
     /* distribute initial velocity values at grid points */
     void initialize_velocity();
-
-    void mapPToSphere(vec3& pos) const;
-    void mapVToSphere(vec3& pos, vec3& vel) const;
 	
     /* FBM noise function for velocity distribution */
     fReal FBM(const fReal x, const fReal y);
