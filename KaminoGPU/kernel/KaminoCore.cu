@@ -806,7 +806,7 @@ __global__ void concentrationLinearSystemKernel
 
     // constant for this grid
     float oDtCr = 1./timeStepGlobal + CrGlobal; // \frac{1}{\Delta t} + Cr
-    float tMDtG = 2 * MGlobal * timeStepGlobal * gamma; // 2M\Delta t\Gamma^*
+    float tMDtG = MGlobal * timeStepGlobal * gamma; // M\Delta t\Gamma^*
     float oCrDtDs = (1 + CrGlobal * timeStepGlobal) * DsGlobal; // (1+Cr\Delta t)D_s
     float s2 = invGridLenGlobal * invGridLenGlobal; // \Delta s^2
 
@@ -930,7 +930,7 @@ __global__ void applyforcevelthetaKernel(fReal* velThetaOutput, fReal* velThetaI
     float vAir = 0;
 
     // elasticity
-    float f1 = -2 * MGlobal * invDelta * pGpy;
+    float f1 = -MGlobal * invDelta * pGpy;
     // air friction
     float f2 = CrGlobal * vAir;
     // gravity
@@ -967,7 +967,7 @@ __global__ void applyforcevelphiKernel
     float uAir = 0;
 
     // elasticity
-    float f1 = -2 * MGlobal * invDelta * pGpx;
+    float f1 = -MGlobal * invDelta * pGpx;
     // air friction
     float f2 = CrGlobal * uAir;
         
@@ -1100,7 +1100,7 @@ __global__ void applyforcevelthetaKernel_viscous
     // force terms
     fReal f1 = uPhi * uPhi * cotTheta;
     fReal f2 = reGlobal * cscTheta * invDelta * pDpx * sigma12;
-    fReal f3 = -2 * MGlobal * invDelta * pGpy;
+    fReal f3 = -MGlobal * invDelta * pGpy;
     fReal f4 = reGlobal * invDelta * pDpy * 2 * (div + pvpy);
     fReal f5 = reGlobal * cscTheta * (psspy + pspx - cosTheta * sigma22);
     
@@ -1278,7 +1278,7 @@ __global__ void applyforcevelphiKernel_viscous
     // force terms
     // fReal f1 = -vTheta * u1 * cotTheta;
     fReal f2 = reGlobal * invDelta * pDpy * sigma12;
-    fReal f3 = -2 * MGlobal * invDelta * cscTheta * pGpx;
+    fReal f3 = -MGlobal * invDelta * cscTheta * pGpx;
     fReal f4 = reGlobal * invDelta * cscTheta * pDpx * 2 * ( 2 * div - pvpy);
     fReal f5 = reGlobal * cscTheta * (psspy + pspx + cosTheta * sigma12);
 
@@ -1469,7 +1469,7 @@ Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
 	       std::string thicknessPath, std::string velocityPath,
 	       std::string thicknessImage, size_t particleDensity, int device):
     radius(radius), invRadius(1/radius), H(H), U(U), c_m(c_m), Gamma_m(Gamma_m), T(T),
-    Ds(Ds*U*radius), gs(g*radius/(U*U)), rm(rm), epsilon(H/radius), sigma_r(R*T), M(Gamma_m*sigma_r/(3*rho*H*U*U)),
+    Ds(Ds/(U*radius)), gs(g*radius/(U*U)), rm(rm), epsilon(H/radius), sigma_r(R*T), M(Gamma_m*sigma_r/(3*rho*H*U*U)),
     S(sigma_a*epsilon/(2*mu*U)), re(mu/(U*radius*rho)), Cr(rhoa*sqrt(mua)*radius/(rho*U*H)),
     nTheta(nTheta), nPhi(2 * nTheta),
     gridLen(M_PI / nTheta), invGridLen(nTheta / M_PI), 
