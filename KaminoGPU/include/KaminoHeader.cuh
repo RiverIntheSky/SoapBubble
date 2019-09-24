@@ -52,10 +52,10 @@ const fReal vSolid = 0.0;
 const fReal R = 8.3144598;              // gas constant. J mol^-1 K^-1
 const fReal sigma_a = 0.07275;		// surface tension of water. N m^-1
 const fReal rho = 997;			// bulk fluid density. kg m^-3
-const fReal mu = 0.0010005;		// soap solution dynamic viscosity. Pa s
+const fReal mu = 0.00089;		// soap solution dynamic viscosity. Pa s
 const fReal g = 9.8;			// standard gravity. m s^-2
 const fReal rhoa = 1.184;		// air density. kg m^-3
-const fReal mua = 1.849e-5;		// air dynamic viscosity. Pa s
+const fReal nua = 1.562e-5;		// air kinematic viscosity. m^2 s^-1
 
 enum gridType { FLUIDGRID, SOLIDGRID };
 

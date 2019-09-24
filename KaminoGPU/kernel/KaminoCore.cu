@@ -805,9 +805,9 @@ __global__ void concentrationLinearSystemKernel
     }
 
     // constant for this grid
-    float oDtCr = 1./timeStepGlobal + CrGlobal; // \frac{1}{\Delta t} + Cr
+    float oDtCr = 1./timeStepGlobal + CrGlobal/eta; // \frac{1}{\Delta t} + Cr/eta
     float tMDtG = MGlobal * timeStepGlobal * gamma; // M\Delta t\Gamma^*
-    float oCrDtDs = (1 + CrGlobal * timeStepGlobal) * DsGlobal; // (1+Cr\Delta t)D_s
+    float oCrDtDs = (1 + CrGlobal/eta * timeStepGlobal) * DsGlobal; // (1+Cr\eta\Delta t)D_s
     float s2 = invGridLenGlobal * invGridLenGlobal; // \Delta s^2
 
     rhs[idx] = gamma * (oDtCr - div);
@@ -932,11 +932,11 @@ __global__ void applyforcevelthetaKernel(fReal* velThetaOutput, fReal* velThetaI
     // elasticity
     float f1 = -MGlobal * invDelta * pGpy;
     // air friction
-    float f2 = CrGlobal * vAir;
+    float f2 = CrGlobal * invDelta * vAir;
     // gravity
     float f3 = gGlobal;
         
-    velThetaOutput[thetaId * pitch + phiId] = (v1 / timeStepGlobal + f1 + f2 + f3) / (1./timeStepGlobal + CrGlobal);
+    velThetaOutput[thetaId * pitch + phiId] = (v1 / timeStepGlobal + f1 + f2 + f3) / (1./timeStepGlobal + CrGlobal * invDelta);
 }
 
 
@@ -969,9 +969,9 @@ __global__ void applyforcevelphiKernel
     // elasticity
     float f1 = -MGlobal * invDelta * pGpx;
     // air friction
-    float f2 = CrGlobal * uAir;
+    float f2 = CrGlobal * invDelta * uAir;
         
-    velPhiOutput[thetaId * pitch + phiId] = (u1 / timeStepGlobal + f1 + f2) / (1./timeStepGlobal + CrGlobal);   
+    velPhiOutput[thetaId * pitch + phiId] = (u1 / timeStepGlobal + f1 + f2) / (1./timeStepGlobal + CrGlobal * invDelta);   
 }
 
 
@@ -1110,11 +1110,11 @@ __global__ void applyforcevelthetaKernel_viscous
     fReal f7 = 0.0;
 # endif
     fReal vAir = 0.0;
-    fReal f6 = CrGlobal * (vAir - v1);
+    fReal f6 = CrGlobal * invDelta * (vAir - v1);
     
     // output
     fReal result = (v1 + timeStepGlobal * (f1 + f2 + f3 + f4 + f5 + CrGlobal * vAir + f7))
-	/ (1.0 + CrGlobal * timeStepGlobal);
+	/ (1.0 + CrGlobal * invDelta * timeStepGlobal);
     // if (fabsf(result) < eps)
     // 	result = 0.f;
     velThetaOutput[thetaId * pitch + phiId] = result;
@@ -1289,11 +1289,11 @@ __global__ void applyforcevelphiKernel_viscous
     	uAir = 20.f * (M_hPI - gTheta) * expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal * cosf(gPhi) / UGlobal;
 # endif
 
-    fReal f6 = CrGlobal * (uAir - u1);
+    fReal f6 = CrGlobal * invDelta * (uAir - u1);
     
     // output
     fReal result = (u1 + timeStepGlobal * (f2 + f3 + f4 + f5 + CrGlobal * uAir))
-	/ (1.0 + (CrGlobal + vTheta * cotTheta) * timeStepGlobal);
+	/ (1.0 + (CrGlobal * invDelta + vTheta * cotTheta) * timeStepGlobal);
     velPhiOutput[thetaId * pitch + phiId] = result;
 }
 
@@ -1470,7 +1470,7 @@ Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
 	       std::string thicknessImage, size_t particleDensity, int device):
     radius(radius), invRadius(1/radius), H(H), U(U), c_m(c_m), Gamma_m(Gamma_m), T(T),
     Ds(Ds/(U*radius)), gs(g*radius/(U*U)), rm(rm), epsilon(H/radius), sigma_r(R*T), M(Gamma_m*sigma_r/(3*rho*H*U*U)),
-    S(sigma_a*epsilon/(2*mu*U)), re(mu/(U*radius*rho)), Cr(rhoa*sqrt(mua)*radius/(rho*U*H)),
+    S(sigma_a*epsilon/(2*mu*U)), re(mu/(U*radius*rho)), Cr(rhoa*sqrt(nua*radius/U)/(rho*H)),
     nTheta(nTheta), nPhi(2 * nTheta),
     gridLen(M_PI / nTheta), invGridLen(nTheta / M_PI), 
     dt(dt*U/radius), DT(DT), frames(frames),
