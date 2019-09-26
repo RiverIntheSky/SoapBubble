@@ -526,53 +526,53 @@ void KaminoSolver::setBroken(bool broken) {
 void KaminoSolver::initThicknessfromPic(std::string path, size_t particleDensity)
 {
     if (path == "") {
-	    return;
-    }
+	std::cout << "No thickness image provided, initialize with eta = 1." << std::endl;
+    } else {
+	cv::Mat image_In, image_Flipped;
+	image_In = cv::imread(path, cv::IMREAD_UNCHANGED);
+	if (!image_In.data) {
+	    std::cout << "No thickness image provided, initialize with eta = 1." << std::endl;
+	} else {
+	    cv::Mat image_Resized;
+	    cv::flip(image_In, image_Flipped, 1);
+	    cv::Size size(nPhi, nTheta);
+	    cv::resize(image_Flipped, image_Resized, size);
+
+	    for (size_t i = 0; i < nPhi; ++i) {
+		for (size_t j = 0; j < nTheta; ++j) {
+		    cv::Point3_<float>* p = image_Resized.ptr<cv::Point3_<float>>(j, i);
+		    fReal C = p->x; // Gray Scale
+		    this->thickness->setCPUValueAt(i, j, C);
+		}
+	    }
+	    this->thickness->copyToGPU();
     
-    cv::Mat image_In, image_Flipped;
-    image_In = cv::imread(path, cv::IMREAD_UNCHANGED);
+	    this->rows = image_Flipped.rows;
+	    this->cols = image_Flipped.cols;
+	    int ratio = this->rows / nTheta;
+	    checkCudaErrors(cudaMemcpyToSymbol(Cols, &(this->cols), sizeof(int)));
+	    checkCudaErrors(cudaMemcpyToSymbol(Rows, &(this->rows), sizeof(int)));
+	    checkCudaErrors(cudaMemcpyToSymbol(Ratio, &ratio, sizeof(int)));
 
-    if (!image_In.data) {
-	std::cerr << "No thickness image provided." << std::endl;
-	return;
-    }
+	    thicknessFullCPU = new fReal[rows * cols];
+	    checkCudaErrors(cudaMalloc((void **)&thicknessFull,
+				       sizeof(fReal) * rows * cols));
+	    checkCudaErrors(cudaMalloc((void **)(&weightFull),
+				       sizeof(float2) * rows * cols));
 
-    cv::Mat image_Resized;
-    cv::flip(image_In, image_Flipped, 1);
-    cv::Size size(nPhi, nTheta);
-    cv::resize(image_Flipped, image_Resized, size);
+	    for (int i = 0; i < cols; ++i) {
+		for (int j = 0; j < rows; ++j) {
+		    cv::Point3_<float>* p = image_Flipped.ptr<cv::Point3_<float>>(j, i);
+		    fReal C = p->x; // Gray Scale
+		    thicknessFullCPU[j * cols + i] = C;
+		}
+	    }
 
-    for (size_t i = 0; i < nPhi; ++i) {
-	for (size_t j = 0; j < nTheta; ++j) {
-	    cv::Point3_<float>* p = image_Resized.ptr<cv::Point3_<float>>(j, i);
-	    fReal C = p->x; // Gray Scale
-	    this->thickness->setCPUValueAt(i, j, C);
-	}
-    }
-    this->thickness->copyToGPU();
-    
-    this->rows = image_Flipped.rows;
-    this->cols = image_Flipped.cols;
-    int ratio = this->rows / nTheta;
-    checkCudaErrors(cudaMemcpyToSymbol(Cols, &(this->cols), sizeof(int)));
-    checkCudaErrors(cudaMemcpyToSymbol(Rows, &(this->rows), sizeof(int)));
-    checkCudaErrors(cudaMemcpyToSymbol(Ratio, &ratio, sizeof(int)));
+	    cudaMemcpy(thicknessFull, thicknessFullCPU, (cols * rows) * sizeof(fReal), cudaMemcpyHostToDevice);
+   	}
 
-    thicknessFullCPU = new fReal[rows * cols];
-    checkCudaErrors(cudaMalloc((void **)&thicknessFull,
-			       sizeof(fReal) * rows * cols));
-    checkCudaErrors(cudaMalloc((void **)(&weightFull),
-			       sizeof(float2) * rows * cols));
+    }    
 
-    for (int i = 0; i < cols; ++i) {
-	for (int j = 0; j < rows; ++j) {
-	    cv::Point3_<float>* p = image_Flipped.ptr<cv::Point3_<float>>(j, i);
-	    fReal C = p->x; // Gray Scale
-	    thicknessFullCPU[j * cols + i] = C;
-	}
-    }
-
-    cudaMemcpy(thicknessFull, thicknessFullCPU, (cols * rows) * sizeof(fReal), cudaMemcpyHostToDevice);
     this->particles = new KaminoParticles(path, particleDensity, gridLen, nTheta);
 
     if (particleDensity > 0) {
@@ -945,10 +945,10 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 		    this->setBroken(true);
 		    return;
 		} else {
-		    images[0][j * cols + i] = Delta * this->H * 2e5;
-		    images[1][j * cols + i] = Delta * this->H * 2e5;
-		    images[2][j * cols + i] = Delta * this->H * 2e5;
-		    of << Delta * this->H << " ";
+		    images[0][j * cols + i] = Delta * this->H * 5e5;
+		    images[1][j * cols + i] = Delta * this->H * 5e5;
+		    images[2][j * cols + i] = Delta * this->H * 5e5; // *4
+		    of << Delta * this->H * 2<< " ";
 		}
 	    }
 	    of << std::endl;
@@ -970,10 +970,10 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 		    this->setBroken(true);
 		}    //		    return;
 		//} else {
-		images[0][j*nPhi+i] = Delta * this->H * 2e5;
-		images[1][j*nPhi+i] = Delta * this->H * 2e5;
-		images[2][j*nPhi+i] = Delta * this->H * 2e5;
-		of << Delta * this->H << " ";
+		images[0][j*nPhi+i] = Delta * this->H * 5e5;
+		images[1][j*nPhi+i] = Delta * this->H * 5e5;
+		images[2][j*nPhi+i] = Delta * this->H * 5e5; // * 4
+		of << Delta * this->H * 2 << " ";
 		//}
 	    }
 	    of << std::endl;
