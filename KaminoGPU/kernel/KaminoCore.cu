@@ -905,7 +905,7 @@ void KaminoSolver::conjugateGradient() {
 
     CHECK_CUBLAS(cublasSdot(cublasHandle, N, d_r, 1, d_r, 1, &r1));
 
-    while (r1 > epsilon*epsilon && k < max_iter) {
+    while (r1 / N > epsilon*epsilon && k < max_iter) {
 	k++;
         if (k == 1) {
 	    cublasScopy(cublasHandle, N, d_r, 1, d_p, 1);
@@ -926,7 +926,7 @@ void KaminoSolver::conjugateGradient() {
         r0 = r1;
         cublasSdot(cublasHandle, N, d_r, 1, d_r, 1, &r1);	
     }
-    printf("  iteration = %3d, residual = %e \n", k, sqrt(r1));
+    printf("  iteration = %3d, residual = %e \n", k, sqrt(r1/N));
     
     CHECK_CUDA(cudaMemcpy2D(surfConcentration->getGPUNextStep(),
 			    surfConcentration->getNextStepPitchInElements() * sizeof(float),
