@@ -4,11 +4,11 @@ U 1
 cm 0.5
 Gammam 0.00001
 T 298.15
-Ds 0.01
+Ds 0.0001
 rm 0.000000005
 numberOfGridsInTheta 128
-timePerStep 0.0002
-timePerFrame 0.02
+timePerStep 0.0005
+timePerFrame 0.05
 frameNumbers 200
 A 0.0
 B 1
