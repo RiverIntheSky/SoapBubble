@@ -67,6 +67,6 @@ enum Coord { phi, theta };
 # define RUNGE_KUTTA
 # define PERFORMANCE_BENCHMARK
 # define TINYEXR_IMPLEMENTATION
-// # define sphere
+# define sphere
 # define gravity
 // # define air

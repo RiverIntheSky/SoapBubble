@@ -6,8 +6,8 @@ Gammam 0.00001
 T 298.15
 Ds 0.0001
 rm 0.000000005
-numberOfGridsInTheta 128
-timePerStep 0.0005
+numberOfGridsInTheta 32
+timePerStep 0.001
 timePerFrame 0.05
 frameNumbers 200
 A 0.0
@@ -17,6 +17,6 @@ D 1
 E 1
 thicknessSave test/frame
 velocitySave  test/vel
-thicknessInit ../init/thickness128.exr
+thicknessInit ../init/thickness32.exr
 particleDensity 0
-gpu 1
+gpu 0

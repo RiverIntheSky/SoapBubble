@@ -889,8 +889,8 @@ void KaminoSolver::conjugateGradient() {
     				     CUSPARSE_INDEX_BASE_ZERO,
     				     CUDA_R_32F));
 
-    // printGPUarraytoMATLAB<float>("test/val.txt", val, N, 5);
-    // printGPUarraytoMATLAB<float>("test/rhs.txt", rhs, N, 1);
+    // printGPUarraytoMATLAB<float>("test/val.txt", val, N, 5, 5);
+    // printGPUarraytoMATLAB<float>("test/rhs.txt", rhs, N, 1, 1);
 
     // r = b - Ax
     CHECK_CUSPARSE(cusparseSpMV_bufferSize(cusparseHandle, trans,
@@ -944,6 +944,10 @@ __global__ void applyforcevelthetaKernel(fReal* velThetaOutput, fReal* velThetaI
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
 
+# ifdef sphere
+    fReal gTheta = ((fReal)thetaId + vThetaThetaOffset) * gridLenGlobal;
+# endif
+
     int thetaSouthId = thetaId + 1;
 
     float v1 = velThetaInput[thetaId * pitch + phiId];
@@ -966,7 +970,11 @@ __global__ void applyforcevelthetaKernel(fReal* velThetaOutput, fReal* velThetaI
     // air friction
     float f2 = CrGlobal * invDelta * vAir;
     // gravity
+# ifdef sphere
+    float f3 = gGlobal * sinf(gTheta);
+# else
     float f3 = gGlobal;
+# endif
         
     velThetaOutput[thetaId * pitch + phiId] = (v1 / timeStepGlobal + f1 + f2 + f3) / (1./timeStepGlobal + CrGlobal * invDelta);
 }

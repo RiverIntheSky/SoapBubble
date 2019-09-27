@@ -220,8 +220,8 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
     
-    // printGPUarraytoMATLAB<int>("test/row_ptr.txt", row_ptr, N + 1, 1);
-    // printGPUarraytoMATLAB<int>("test/col_ind.txt", col_ind, N, 5);
+    // printGPUarraytoMATLAB<int>("test/row_ptr.txt", row_ptr, N + 1, 1, 1);
+    // printGPUarraytoMATLAB<int>("test/col_ind.txt", col_ind, N, 5, 5);
     
     // cuSPARSE and cuBLAS
     CHECK_CUBLAS(cublasCreate(&cublasHandle));

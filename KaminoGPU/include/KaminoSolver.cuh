@@ -195,7 +195,8 @@ public:
     template <typename T>
     void printGPUarray(std::string repr, T* vec, int len);
     template <typename T>
-    void printGPUarraytoMATLAB(std::string filename, T* vec, int num_row, int num_col);
+    void printGPUarraytoMATLAB(std::string filename, T* vec, int num_row, int num_col,
+			       size_t pitch);
 
     KaminoParticles* particles;
 };
@@ -215,12 +216,16 @@ void KaminoSolver::printGPUarray(std::string repr, T* vec, int len) {
 
 template <typename T>
 void KaminoSolver::printGPUarraytoMATLAB(std::string filename, T* vec, int num_row,
-					 int num_col) {
+					 int num_col, size_t pitch) {
     std::ofstream of(filename);
     int len = num_row * num_col;
     T cpuvec[len];
-    CHECK_CUDA(cudaMemcpy(cpuvec, vec, len * sizeof(T),
-			  cudaMemcpyDeviceToHost));
+
+    CHECK_CUDA(cudaMemcpy2D(cpuvec, num_col * sizeof(T), vec,
+			    pitch * sizeof(T),
+			    num_col * sizeof(T), num_row,
+			    cudaMemcpyDeviceToHost));
+
     for (int row = 0; row < num_row; row++) {
 	for (int col = 0; col < num_col; col++) {
 	    of << cpuvec[row * num_col + col] << " ";
