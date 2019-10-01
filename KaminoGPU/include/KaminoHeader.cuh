@@ -16,6 +16,7 @@
 # include "helper_functions.h"
 # include "device_launch_parameters.h"
 # include "helper_cuda.h"
+# include "helper_math.h"
 # include "cufft.h"
 # include "vectorUtil.cuh"
 
