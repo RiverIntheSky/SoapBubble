@@ -1016,7 +1016,8 @@ __global__ void concentrationLinearSystemKernel
     fReal halfStep = 0.5 * gridLenGlobal;
     fReal sinThetaSouth = sinf(gTheta + halfStep);
     fReal sinThetaNorth = sinf(gTheta - halfStep);
-    fReal cscTheta = 1. / sinf(gTheta);
+    fReal sinTheta = sinf(gTheta);
+    fReal cscTheta = 1. / sinTheta;
 # endif
 
     // neighboring eta values
@@ -1040,8 +1041,9 @@ __global__ void concentrationLinearSystemKernel
 
     // constant for this grid
     float oDtCre = 1./timeStepGlobal + CrGlobal/eta; // \frac{1}{\Delta t} + Cr/eta
-    float tMDtG = MGlobal * timeStepGlobal * gamma; // M\Delta t\Gamma^*
-    float oCrDteDs = (1 + CrGlobal * timeStepGlobal / eta) * DsGlobal; // (1+Cr\eta\Delta t)D_s
+    float MDt = MGlobal * timeStepGlobal; // M\Delta t
+    /* Ds is zero */
+    // float oCrDteDs = (1 + CrGlobal * timeStepGlobal / eta) * DsGlobal; // (1+Cr\eta\Delta t)D_s
     float s2 = invGridLenGlobal * invGridLenGlobal; // \Delta s^2
 
     rhs[idx] = oDtCre - div;
@@ -1057,50 +1059,51 @@ __global__ void concentrationLinearSystemKernel
 	* cosf(2 * gPhi) * radiusGlobal / UGlobal;
 # endif
 # endif
-    rhs[idx] -= CrGlobal * timeStepGlobal / eta * diva;	
-    rhs[idx] *= gamma;
+    rhs[idx] -= CrGlobal * timeStepGlobal / eta * diva;
+# ifdef sphere
+    rhs[idx] *= sinTheta;
+# endif
 	
     // up
     float etaxyminus_ = 2. / (etaNorth + eta);
 # ifdef sphere
-    val[idx5] = -s2 * sinThetaNorth * cscTheta * (tMDtG * etaxyminus_ + oCrDteDs);
+    val[idx5] = -s2 * sinThetaNorth * MDt * etaxyminus_;
 # else
-    val[idx5] = -s2 * (tMDtG * etaxyminus_ + oCrDteDs);
+    val[idx5] = -s2 * MDt * etaxyminus_;
 # endif
 
     // left
     float etaxminusy_ = 2. / (etaWest + eta);
 # ifdef sphere
-    val[idx5 + 1] = -s2 * cscTheta * cscTheta * (tMDtG * etaxminusy_ + oCrDteDs);
+    val[idx5 + 1] = -s2 * cscTheta * MDt * etaxminusy_;
 # else
-    val[idx5 + 1] = -s2 * (tMDtG * etaxminusy_ + oCrDteDs);
+    val[idx5 + 1] = -s2 * MDt * etaxminusy_;
 # endif  
 
     // right
     float etaxplusy_ = 2. / (etaEast + eta);
 # ifdef sphere
-    val[idx5 + 3] = -s2 * cscTheta * cscTheta * (tMDtG * etaxplusy_ + oCrDteDs);
+    val[idx5 + 3] = -s2 * cscTheta * MDt * etaxplusy_;
 # else
-    val[idx5 + 3] = -s2 * (tMDtG * etaxplusy_ + oCrDteDs);
+    val[idx5 + 3] = -s2 * MDt * etaxplusy_;
 # endif  
     
     // down
     float etaxyplus_ = 2. / (etaSouth + eta);
 # ifdef sphere
-    val[idx5 + 4] = -s2 * sinThetaSouth * cscTheta * (tMDtG * etaxyplus_ + oCrDteDs);
+    val[idx5 + 4] = -s2 * sinThetaSouth * MDt * etaxyplus_;
 # else
-    val[idx5 + 4] = -s2 * (tMDtG * etaxyplus_ + oCrDteDs);
+    val[idx5 + 4] = -s2 * MDt * etaxyplus_;
 # endif  
 
     // center
 # ifdef sphere
-    val[idx5 + 2] = oDtCre + s2 * cscTheta *
-	(oCrDteDs * (sinThetaNorth + sinThetaSouth + 2 * cscTheta)
-	 + tMDtG * (cscTheta * (etaxplusy_ + etaxminusy_)
-		    + sinThetaNorth * etaxyminus_
-		    + sinThetaSouth * etaxyplus_));
+    val[idx5 + 2] = oDtCre / gamma * sinTheta + MDt * s2 *
+	(cscTheta * (etaxplusy_ + etaxminusy_)
+	 + sinThetaNorth * etaxyminus_
+	 + sinThetaSouth * etaxyplus_);
 # else
-    val[idx5 + 2] = oDtCre + 4 * oCrDteDs * s2 + s2 * tMDtG *
+    val[idx5 + 2] = oDtCre / gamma + s2 * MDt * 
 	(etaxyminus_ + etaxminusy_ + etaxplusy_ + etaxyplus_);
 # endif
 }
