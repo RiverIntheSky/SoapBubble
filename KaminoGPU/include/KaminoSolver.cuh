@@ -37,6 +37,7 @@ __device__ bool validateCoord(fReal& phi, fReal& theta, size_t& nPhi);
 __device__ fReal kaminoLerp(fReal from, fReal to, fReal alpha);
 __device__ fReal sampleCentered(fReal* input, fReal phiRawId, fReal thetaRawId, size_t pitch);
 __global__ void resetThickness(float2* weight);
+__global__ void initLinearSystem(int* row_ptr, int* col_ind, int* row_ptrm, int* col_indm, float* valm);
 
 class KaminoSolver
 {
@@ -111,7 +112,9 @@ private:
     cublasHandle_t cublasHandle;
     cusparseHandle_t cusparseHandle;
     cusparseDnVecDescr_t vecR, vecX, vecP, vecO;
-
+    /* Description of the A matrix*/
+    cusparseMatDescr_t descrA;
+    
     const float zero = 0.f;
     const float one = 1.f;
     const float minusone = -1.f;

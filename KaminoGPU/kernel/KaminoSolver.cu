@@ -143,7 +143,7 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 
     cudaDeviceProp deviceProp;
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, device));
-    this->nThreadxMax = min(deviceProp.maxThreadsDim[0], 128);
+    this->nThreadxMax = deviceProp.maxThreadsDim[0];
     
     checkCudaErrors(cudaMalloc((void **)&gpuUFourier,
 			       sizeof(ComplexFourier) * N));
@@ -243,6 +243,12 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     CHECK_CUSPARSE(cusparseCreateDnVec(&vecR, N, d_r, CUDA_R_32F));
     CHECK_CUSPARSE(cusparseCreateDnVec(&vecP, N, d_p, CUDA_R_32F));
     CHECK_CUSPARSE(cusparseCreateDnVec(&vecO, N, d_omega, CUDA_R_32F));
+
+    CHECK_CUSPARSE(cusparseCreateMatDescr(&descrA));
+
+    /* Define the properties of the matrix */
+    cusparseSetMatType(descrA,CUSPARSE_MATRIX_TYPE_GENERAL);
+    cusparseSetMatIndexBase(descrA,CUSPARSE_INDEX_BASE_ZERO);
     
     int sigLenArr[1];
     sigLenArr[0] = nPhi;

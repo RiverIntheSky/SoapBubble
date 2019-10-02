@@ -70,5 +70,5 @@ enum Coord { phi, theta };
 # define TINYEXR_IMPLEMENTATION
 # define sphere
 // # define gravity
-// # define uair
-# define vair
+# define uair
+// # define vair

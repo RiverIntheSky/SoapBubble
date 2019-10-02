@@ -1110,11 +1110,10 @@ __global__ void concentrationLinearSystemKernel
 
 
 void KaminoSolver::conjugateGradient() {
+    
     const int max_iter = 1000;
     int k = 0;
-    cusparseSpMatDescr_t matA;
-    void *dBuffer = 0;
-    size_t bufferSize;
+    
     const cusparseOperation_t trans = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
     CHECK_CUDA(cudaMemcpy2D(d_x, nPhi * sizeof(float), surfConcentration->getGPUThisStep(),
@@ -1125,27 +1124,14 @@ void KaminoSolver::conjugateGradient() {
     CHECK_CUDA(cudaMemcpy(d_r, rhs, N * sizeof(float),
 			  cudaMemcpyDeviceToDevice));
 
-    // Create sparse matrix A in CSR format
-    CHECK_CUSPARSE(cusparseCreateCsr(&matA, N, N, nz, row_ptr, col_ind,
-    				     val, CUSPARSE_INDEX_32I,
-    				     CUSPARSE_INDEX_32I,
-    				     CUSPARSE_INDEX_BASE_ZERO,
-    				     CUDA_R_32F));
-
     // printGPUarraytoMATLAB<float>("test/val.txt", val, N, 5, 5);
-    // printGPUarraytoMATLAB<float>("test/rhs.txt", rhs, N, 1, 1);
+    // printGPUarraytoMATLAB<float>("test/rhs.txt", d_r, N, 1, 1);
+    // printGPUarraytoMATLAB<float>("test/x.txt", d_x, N, 1, 1);
 
     // r = b - Ax
-    CHECK_CUSPARSE(cusparseSpMV_bufferSize(cusparseHandle, trans,
-					   &minusone, matA, vecX, &one, vecR, CUDA_R_32F,
-					   CUSPARSE_CSRMV_ALG1, &bufferSize));
-
-    CHECK_CUDA(cudaMalloc(&dBuffer, bufferSize));
-
-    CHECK_CUSPARSE(cusparseSpMV(cusparseHandle, trans,
-    				&minusone, matA, vecX, &one, vecR, CUDA_R_32F,
-    				CUSPARSE_CSRMV_ALG1, dBuffer));
-
+    CHECK_CUSPARSE(cusparseScsrmv(cusparseHandle, trans, N, N, nz, &minusone, descrA, val,
+    				  row_ptr, col_ind, d_x, &one, d_r));
+    
     CHECK_CUBLAS(cublasSdot(cublasHandle, N, d_r, 1, d_r, 1, &r1));
 
     while (r1 / N > epsilon*epsilon && k < max_iter) {
@@ -1157,9 +1143,8 @@ void KaminoSolver::conjugateGradient() {
             cublasSscal(cublasHandle, N, &beta, d_p, 1);
             cublasSaxpy(cublasHandle, N, &one, d_r, 1, d_p, 1);
 	}
-	CHECK_CUSPARSE(cusparseSpMV(cusparseHandle, trans,
-				    &one, matA, vecP, &zero, vecO, CUDA_R_32F,
-				    CUSPARSE_CSRMV_ALG1, dBuffer));
+	CHECK_CUSPARSE(cusparseScsrmv(cusparseHandle, trans, N, N, nz, &one, descrA, val,
+				      row_ptr, col_ind, d_p, &zero, d_omega));
 
         cublasSdot(cublasHandle, N, d_p, 1, d_omega, 1, &dot);
         alpha = r1/dot;
@@ -1175,9 +1160,6 @@ void KaminoSolver::conjugateGradient() {
 			    surfConcentration->getNextStepPitchInElements() * sizeof(float),
 			    d_x, nPhi * sizeof(float), nPhi * sizeof(float), nTheta,
 			    cudaMemcpyDeviceToDevice));
-    
-    CHECK_CUSPARSE(cusparseDestroySpMat(matA));    
-    CHECK_CUDA(cudaFree(dBuffer));
 }
 
 
@@ -1690,12 +1672,16 @@ __global__ void applyforceSurfConcentration
 }
 
 
-void KaminoSolver::bodyforce()
-{
+void KaminoSolver::bodyforce() {
     dim3 gridLayout;
     dim3 blockLayout;
 
     bool inviscid = true;
+
+    determineLayout(gridLayout, blockLayout, 1, N + 1);
+    initLinearSystem<<<gridLayout, blockLayout>>>(row_ptr, col_ind, row_ptrm, col_indm, valm);
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
     
     // div(u^n)
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
