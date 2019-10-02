@@ -1,4 +1,4 @@
-radius 0.05
+radius 0.5
 H 0.0000005
 U 1
 cm 0.5
@@ -7,7 +7,7 @@ T 298.15
 Ds 0.0001
 rm 0.000000005
 numberOfGridsInTheta 64
-timePerStep 0.0001
+timePerStep 0.0005
 timePerFrame 0.02
 frameNumbers 500
 A 0.0
@@ -15,8 +15,8 @@ B 1
 C 1
 D 1
 E 1
-thicknessSave test/frame
-velocitySave  test/vel
+thicknessSave vair/frame
+velocitySave  vair/vel
 thicknessInit ../init/thickness64.exr
 particleDensity 8
 gpu 0

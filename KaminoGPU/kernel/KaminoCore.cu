@@ -1011,11 +1011,12 @@ __global__ void concentrationLinearSystemKernel
     float div = div_a[idx];
 
 # ifdef sphere
-    fReal thetaCoord = ((float)thetaId + centeredThetaOffset) * gridLenGlobal;
+    fReal gTheta = ((float)thetaId + centeredThetaOffset) * gridLenGlobal;
+    fReal gPhi = ((float)phiId + centeredPhiOffset) * gridLenGlobal;
     fReal halfStep = 0.5 * gridLenGlobal;
-    fReal sinThetaSouth = sinf(thetaCoord + halfStep);
-    fReal sinThetaNorth = sinf(thetaCoord - halfStep);
-    fReal cscTheta = 1. / sinf(thetaCoord);
+    fReal sinThetaSouth = sinf(gTheta + halfStep);
+    fReal sinThetaNorth = sinf(gTheta - halfStep);
+    fReal cscTheta = 1. / sinf(gTheta);
 # endif
 
     // neighboring eta values
@@ -1043,7 +1044,21 @@ __global__ void concentrationLinearSystemKernel
     float oCrDteDs = (1 + CrGlobal * timeStepGlobal / eta) * DsGlobal; // (1+Cr\eta\Delta t)D_s
     float s2 = invGridLenGlobal * invGridLenGlobal; // \Delta s^2
 
-    rhs[idx] = gamma * (oDtCre - div);
+    rhs[idx] = oDtCre - div;
+    float diva = 0.f;
+# ifdef sphere
+# ifdef uair
+    diva += 20.f * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * (M_hPI - gTheta)
+	* expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal
+	* sinf(gPhi) * cscTheta / UGlobal;
+# endif
+# ifdef vair
+    diva += (gTheta < M_hPI) * 4 * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * cosf(gTheta)
+	* cosf(2 * gPhi) * radiusGlobal / UGlobal;
+# endif
+# endif
+    rhs[idx] -= CrGlobal * timeStepGlobal / eta * diva;	
+    rhs[idx] *= gamma;
 	
     // up
     float etaxyminus_ = 2. / (etaNorth + eta);
@@ -1171,6 +1186,7 @@ __global__ void applyforcevelthetaKernel(fReal* velThetaOutput, fReal* velThetaI
 
 # ifdef sphere
     fReal gTheta = ((fReal)thetaId + vThetaThetaOffset) * gridLenGlobal;
+    fReal gPhi = ((fReal)phiId + vThetaPhiOffset) * gridLenGlobal;
 # endif
 
     int thetaSouthId = thetaId + 1;
@@ -1188,17 +1204,23 @@ __global__ void applyforcevelthetaKernel(fReal* velThetaOutput, fReal* velThetaI
     // pGpy = \frac{\partial\Gamma}{\partial\theta};
     float pGpy = invGridLenGlobal * (GammaSouth - GammaNorth);
 
-    float vAir = 0;
-
     // elasticity
     float f1 = -MGlobal * invDelta * pGpy;
     // air friction
+    float vAir = 0.f;
+# if defined vair && defined sphere
+    vAir = (gTheta < M_hPI) * 2 * (1 - smoothstep(0.f, 10.f, currentTimeGlobal))
+	* sinf(gTheta) * cosf(2 * gPhi) * radiusGlobal / UGlobal;
+# endif
     float f2 = CrGlobal * invDelta * vAir;
     // gravity
+    float f3 = 0.f;
+# ifdef gravity
 # ifdef sphere
-    float f3 = gGlobal * sinf(gTheta);
+    f3 = gGlobal * sinf(gTheta);
 # else
-    float f3 = gGlobal;
+    f3 = gGlobal;
+# endif
 # endif
         
     velThetaOutput[thetaId * pitch + phiId] = (v1 / timeStepGlobal + f1 + f2 + f3) / (1./timeStepGlobal + CrGlobal * invDelta);
@@ -1212,6 +1234,12 @@ __global__ void applyforcevelphiKernel
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+
+# ifdef sphere
+    // Coord in phi-theta space
+    fReal gPhi = ((fReal)phiId + vPhiPhiOffset) * gridLenGlobal;
+    fReal gTheta = ((fReal)thetaId + vPhiThetaOffset) * gridLenGlobal;
+# endif
 
     int phiWestId = (phiId - 1 + nPhiGlobal) % nPhiGlobal;
 
@@ -1227,13 +1255,17 @@ __global__ void applyforcevelphiKernel
     fReal invDelta = 2. / (DeltaWest + DeltaEast);
     
     // pGpx = \frac{\partial\Gamma}{\partial\phi};
-    fReal pGpx = invGridLenGlobal * (GammaEast - GammaWest);
-
-    float uAir = 0;
+    fReal pGpx = invGridLenGlobal * (GammaEast - GammaWest);    
 
     // elasticity
     float f1 = -MGlobal * invDelta * pGpx;
     // air friction
+    float uAir = 0.f;
+# if defined uair && defined sphere
+    uAir = 20.f * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * (M_hPI - gTheta)
+	* expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal
+	* cosf(gPhi) / UGlobal;
+# endif
     float f2 = CrGlobal * invDelta * uAir;
         
     velPhiOutput[thetaId * pitch + phiId] = (u1 / timeStepGlobal + f1 + f2) / (1./timeStepGlobal + CrGlobal * invDelta);   
@@ -1549,7 +1581,7 @@ __global__ void applyforcevelphiKernel_viscous
 
     // fReal f7 = 0.0; 		// gravity
     fReal uAir = 0.0;
-# ifdef air
+# ifdef uair
     if (currentTimeGlobal < 5)
     	uAir = 20.f * (M_hPI - gTheta) * expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal * cosf(gPhi) / UGlobal;
 # endif
