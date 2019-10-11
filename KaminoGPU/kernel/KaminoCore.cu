@@ -1018,6 +1018,7 @@ __global__ void concentrationLinearSystemKernel
     fReal sinThetaNorth = sinf(gTheta - halfStep);
     fReal sinTheta = sinf(gTheta);
     fReal cscTheta = 1. / sinTheta;
+    fReal cosTheta = cosf(gTheta);
 # endif
 
     // neighboring eta values
@@ -1055,8 +1056,11 @@ __global__ void concentrationLinearSystemKernel
 	* sinf(gPhi) * cscTheta / UGlobal;
 # endif
 # ifdef vair
-    diva += (gTheta < M_hPI) * 4 * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * cosf(gTheta)
+    diva += (gTheta < M_hPI) * 4 * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * cosTheta
 	* cosf(2 * gPhi) * radiusGlobal / UGlobal;
+# endif
+# ifdef gravity
+    rhs[idx] -= 2 * gGlobal * cosTheta * timeStepGlobal;
 # endif
 # endif
     rhs[idx] -= CrGlobal * timeStepGlobal / eta * diva;
