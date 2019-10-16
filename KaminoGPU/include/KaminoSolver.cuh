@@ -1,35 +1,9 @@
 # pragma once
 
+# include <amgx_c.h>
+# include "../include/KaminoGPU.cuh"
 # include "../include/KaminoQuantity.cuh"
 # include "../include/KaminoParticles.cuh"
-
-#define CHECK_CUDA(func)						\
-    {									\
-	cudaError_t status = (func);					\
-	if (status != cudaSuccess) {					\
-	    printf("CUDA API failed at line %d with error: %s (%d)\n",	\
-		   __LINE__, cudaGetErrorString(status), status);	\
-	}								\
-    }
-
-
-#define CHECK_CUSPARSE(func)						\
-    {									\
-	cusparseStatus_t status = (func);				\
-	if (status != CUSPARSE_STATUS_SUCCESS) {			\
-	    printf("CUSPARSE API failed at line %d with error: %s (%d)\n", \
-		   __LINE__, cusparseGetErrorString(status), status);	\
-	}								\
-    }
-
-
-// TODO
-#define CHECK_CUBLAS(func)						\
-    {									\
- 	cublasStatus_t status = (func);					\
-	checkCudaErrors(status);					\
-    }
-
 
 extern __constant__ fReal invGridLenGlobal;
 
@@ -37,7 +11,7 @@ __device__ bool validateCoord(fReal& phi, fReal& theta, size_t& nPhi);
 __device__ fReal kaminoLerp(fReal from, fReal to, fReal alpha);
 __device__ fReal sampleCentered(fReal* input, fReal phiRawId, fReal thetaRawId, size_t pitch);
 __global__ void resetThickness(float2* weight);
-__global__ void initLinearSystem(int* row_ptr, int* col_ind, int* row_ptrm, int* col_indm, float* valm);
+__global__ void initLinearSystem(int* row_ptr, int* col_ind);
 
 class KaminoSolver
 {
@@ -98,8 +72,7 @@ private:
     bool broken = false;
 
     /* harmonic coefficients for velocity field initializaton */
-    fReal A;
-    int B, C, D, E;
+    //    int B, C, D, E;
 
     /* average film thickness */
     fReal H;
@@ -121,8 +94,8 @@ private:
     float r0, r1, beta, alpha, nalpha, dot;
 
     float *d_r, *d_p, *d_omega, *d_x;
-    int *row_ptr, *col_ind, *row_ptrm, *col_indm;
-    float *rhs, *val, *valm;
+    int *row_ptr, *col_ind;
+    float *rhs, *val;
 
     cusparseSpMatDescr_t matM; /* pre-conditioner */
 
@@ -151,11 +124,22 @@ private:
     float bodyforceTime;
     float CGTime;
 
+    // AMGX
+    AMGX_Mode mode;
+    AMGX_config_handle cfg;
+    AMGX_resources_handle res;
+    AMGX_matrix_handle A;
+    AMGX_vector_handle b, x;
+    AMGX_solver_handle solver;
+    //status handling
+    AMGX_SOLVE_STATUS status;
+
     /// Kernel calling from here
     void advection(fReal& timeStep);
     void advection();
     void bodyforce();
     void conjugateGradient();
+    void AlgebraicMultiGridCG();
 
     // Swap all these buffers of the attributes.
     void swapVelocityBuffers();
@@ -174,7 +158,7 @@ private:
 			 size_t nRow_theta, size_t nCol_phi);
 public:
     KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
-		 fReal A, int B, int C, int D, int E, fReal H, int device);
+		 fReal H, int device, std::string AMGconfig);
     ~KaminoSolver();
 
     void initWithConst(KaminoQuantity* attrib, fReal val);

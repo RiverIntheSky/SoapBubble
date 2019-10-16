@@ -1,6 +1,6 @@
 # include "KaminoSolver.cuh"
-# include "../include/KaminoGPU.cuh"
-# include "../include/KaminoTimer.cuh"
+# include "KaminoGPU.cuh"
+# include "KaminoTimer.cuh"
 
 __constant__ fReal invGridLenGlobal;
 static __constant__ size_t nPhiGlobal;
@@ -997,6 +997,58 @@ __global__ void divergenceKernel
 }
 
 
+// compute divergence using eq (16), seems to differ a lot from compute it using velocity
+// directly?
+__global__ void divergenceKernel_fromGamma(float* div, float* gammaNext, float* gammaThis,
+					   size_t pitch) {
+    // Index
+    int splitVal = nPhiGlobal / blockDim.x;
+    int threadSequence = blockIdx.x % splitVal;
+    int phiId = threadIdx.x + threadSequence * blockDim.x;
+    int thetaId = blockIdx.x / splitVal;
+    
+    fReal thetaCoord = ((fReal)thetaId + centeredThetaOffset) * gridLenGlobal;
+    
+    fReal halfStep = 0.5 * gridLenGlobal;
+
+    fReal cscTheta = 1.f / sinf(thetaCoord);
+    fReal sinThetaSouth = sinf(thetaCoord + halfStep);
+    fReal sinThetaNorth = sinf(thetaCoord - halfStep);
+
+    float gamma_a = gammaThis[thetaId * pitch + phiId];
+    fReal gamma = gammaNext[thetaId * pitch + phiId];
+    fReal gammaWest = gammaNext[thetaId * pitch + (phiId - 1 + nPhiGlobal) % nPhiGlobal];
+    fReal gammaEast = gammaNext[thetaId * pitch + (phiId + 1) % nPhiGlobal];
+    fReal gammaNorth = 0.0;
+    fReal gammaSouth = 0.0;
+    if (thetaId != 0) {
+    	gammaNorth = gammaNext[(thetaId - 1) * pitch + phiId];
+    } else {
+    	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
+    	gammaNorth = gammaNext[thetaId * pitch + oppositePhiId];
+    }
+    if (thetaId != nThetaGlobal - 1) {
+    	gammaSouth = gammaNext[(thetaId + 1) * pitch + phiId];
+    } else {
+    	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
+    	gammaSouth = gammaNext[thetaId * pitch + oppositePhiId];
+    }
+// # ifdef sphere
+//     fReal laplace = invGridLenGlobal * invGridLenGlobal * cscTheta *
+// 	(sinThetaSouth * (gammaSouth - gamma) - sinThetaNorth * (gamma - gammaNorth) +
+// 		    cscTheta * (gammaEast + gammaWest - 2 * gamma));
+// # else
+//     fReal laplace = invGridLenGlobal * invGridLenGlobal * 
+//     	(gammaWest - 4*gamma + gammaEast + gammaNorth + gammaSouth);
+// #endif
+    
+    div[thetaId * nPhiGlobal + phiId]
+	= (1 - gamma/gamma_a) / timeStepGlobal;
+	//	= (DsGlobal * laplace - (gamma - gamma_a) / timeStepGlobal) / gamma_a;
+
+}
+
+
 __global__ void concentrationLinearSystemKernel
 (float* div_a, float* gamma_a, float* eta_a, float* val, float* rhs, size_t pitch) {
     // TODO: pre-compute eta???
@@ -1117,7 +1169,9 @@ void KaminoSolver::conjugateGradient() {
     
     const int max_iter = 1000;
     int k = 0;
-    
+    cusparseSpMatDescr_t matA;
+    void *dBuffer = 0;
+    size_t bufferSize;
     const cusparseOperation_t trans = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
     CHECK_CUDA(cudaMemcpy2D(d_x, nPhi * sizeof(float), surfConcentration->getGPUThisStep(),
@@ -1128,13 +1182,29 @@ void KaminoSolver::conjugateGradient() {
     CHECK_CUDA(cudaMemcpy(d_r, rhs, N * sizeof(float),
 			  cudaMemcpyDeviceToDevice));
 
-    // printGPUarraytoMATLAB<float>("test/val.txt", val, N, 5, 5);
-    // printGPUarraytoMATLAB<float>("test/rhs.txt", d_r, N, 1, 1);
+    //    printGPUarraytoMATLAB<float>("test/val.txt", val, N, 5, 5);
+    //    printGPUarraytoMATLAB<float>("test/rhs.txt", d_r, N, 1, 1);
     // printGPUarraytoMATLAB<float>("test/x.txt", d_x, N, 1, 1);
 
     // r = b - Ax
-    CHECK_CUSPARSE(cusparseScsrmv(cusparseHandle, trans, N, N, nz, &minusone, descrA, val,
-    				  row_ptr, col_ind, d_x, &one, d_r));
+    CHECK_CUSPARSE(cusparseCreateCsr(&matA, N, N, nz, row_ptr, col_ind,
+    				     val, CUSPARSE_INDEX_32I,
+    				     CUSPARSE_INDEX_32I,
+    				     CUSPARSE_INDEX_BASE_ZERO,
+    				     CUDA_R_32F));
+
+    CHECK_CUSPARSE(cusparseSpMV_bufferSize(cusparseHandle, trans,
+					   &minusone, matA, vecX, &one, vecR, CUDA_R_32F,
+					   CUSPARSE_CSRMV_ALG1, &bufferSize));
+
+    CHECK_CUDA(cudaMalloc(&dBuffer, bufferSize));
+
+    CHECK_CUSPARSE(cusparseSpMV(cusparseHandle, trans,
+    				&minusone, matA, vecX, &one, vecR, CUDA_R_32F,
+    				CUSPARSE_CSRMV_ALG1, dBuffer));
+    
+    //CHECK_CUSPARSE(cusparseScsrmv(cusparseHandle, trans, N, N, nz, &minusone, descrA, val,
+    //				  row_ptr, col_ind, d_x, &one, d_r));
     
     CHECK_CUBLAS(cublasSdot(cublasHandle, N, d_r, 1, d_r, 1, &r1));
 
@@ -1164,8 +1234,31 @@ void KaminoSolver::conjugateGradient() {
 			    surfConcentration->getNextStepPitchInElements() * sizeof(float),
 			    d_x, nPhi * sizeof(float), nPhi * sizeof(float), nTheta,
 			    cudaMemcpyDeviceToDevice));
+    CHECK_CUSPARSE(cusparseDestroySpMat(matA));    
+    CHECK_CUDA(cudaFree(dBuffer));
 }
 
+
+void KaminoSolver::AlgebraicMultiGridCG() {
+    CHECK_CUDA(cudaMemcpy2D(d_x, nPhi * sizeof(float), surfConcentration->getGPUThisStep(),
+			    surfConcentration->getThisStepPitchInElements() * sizeof(float),
+			    nPhi * sizeof(float), nTheta,
+			    cudaMemcpyDeviceToDevice));
+
+    AMGX_vector_upload(b, N, 1, rhs);
+    AMGX_vector_upload(x, N, 1, d_x);
+    AMGX_matrix_upload_all(A, N, nz, 1, 1, row_ptr, col_ind, val, 0);
+    AMGX_solver_setup(solver, A);
+    AMGX_solver_solve(solver, b, x);
+    AMGX_vector_download(x, d_x);
+    CHECK_CUDA(cudaMemcpy2D(surfConcentration->getGPUNextStep(),
+			    surfConcentration->getNextStepPitchInElements() * sizeof(float),
+			    d_x, nPhi * sizeof(float), nPhi * sizeof(float), nTheta,
+			    cudaMemcpyDeviceToDevice));
+    int num_iter;
+    AMGX_solver_get_iterations_number(solver, &num_iter);
+    std::cout <<  "Total Iterations:  " << num_iter << std::endl;
+}
 
 __global__ void applyforcevelthetaKernel(fReal* velThetaOutput, fReal* velThetaInput, fReal* thickness, fReal* concentration, size_t pitch) {
     int splitVal = nPhiGlobal / blockDim.x;
@@ -1683,7 +1776,7 @@ void KaminoSolver::bodyforce() {
     bool inviscid = true;
 
     determineLayout(gridLayout, blockLayout, 1, N + 1);
-    initLinearSystem<<<gridLayout, blockLayout>>>(row_ptr, col_ind, row_ptrm, col_indm, valm);
+    initLinearSystem<<<gridLayout, blockLayout>>>(row_ptr, col_ind);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
     
@@ -1704,7 +1797,8 @@ void KaminoSolver::bodyforce() {
     KaminoTimer CGtimer;
     CGtimer.startTimer();
 # endif
-    conjugateGradient();
+    AlgebraicMultiGridCG();
+    // conjugateGradient();
 # ifdef PERFORMANCE_BENCHMARK
     this->CGTime += CGtimer.stopTimer() * 0.001f;
 # endif  
@@ -1719,11 +1813,21 @@ void KaminoSolver::bodyforce() {
     checkCudaErrors(cudaDeviceSynchronize());
 
     // div(u^{n+1})
-    divergenceKernel<<<gridLayout, blockLayout>>>
-    	(div, velPhi->getGPUNextStep(), velTheta->getGPUNextStep(),
-    	 velPhi->getNextStepPitchInElements(), velTheta->getNextStepPitchInElements());
+    // divergenceKernel<<<gridLayout, blockLayout>>>
+    // 	(div, velPhi->getGPUNextStep(), velTheta->getGPUNextStep(),
+    // 	 velPhi->getNextStepPitchInElements(), velTheta->getNextStepPitchInElements());
+    // checkCudaErrors(cudaGetLastError());
+    // checkCudaErrors(cudaDeviceSynchronize());
+
+    // printGPUarraytoMATLAB<float>("test/div.txt", div, nTheta, nPhi, nPhi);
+
+    divergenceKernel_fromGamma<<<gridLayout, blockLayout>>>
+    	(div, surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
+    	 surfConcentration->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
+
+    // printGPUarraytoMATLAB<float>("test/div_g.txt", div, nTheta, nPhi, nPhi);
 
     if (particles->numOfParticles > 0) {
     	determineLayout(gridLayout, blockLayout, 1, particles->numOfParticles);
@@ -1755,30 +1859,32 @@ void KaminoSolver::bodyforce() {
 
 Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
 	       fReal T, fReal Ds, fReal rm, size_t nTheta, 
-	       float dt, float DT, int frames, fReal A, int B, int C, int D, int E,
+	       float dt, float DT, int frames,
 	       std::string thicknessPath, std::string velocityPath,
-	       std::string thicknessImage, size_t particleDensity, int device):
+	       std::string thicknessImage, size_t particleDensity, int device,
+	       std::string AMGconfig):
     radius(radius), invRadius(1/radius), H(H), U(U), c_m(c_m), Gamma_m(Gamma_m), T(T),
     Ds(Ds/(U*radius)), gs(g*radius/(U*U)), rm(rm), epsilon(H/radius), sigma_r(R*T), M(Gamma_m*sigma_r/(3*rho*H*U*U)),
     S(sigma_a*epsilon/(2*mu*U)), re(mu/(U*radius*rho)), Cr(rhoa*sqrt(nua*radius/U)/(rho*H)),
     nTheta(nTheta), nPhi(2 * nTheta),
     gridLen(M_PI / nTheta), invGridLen(nTheta / M_PI), 
     dt(dt*U/radius), DT(DT), frames(frames),
-    A(A), B(B), C(C), D(D), E(E),
     thicknessPath(thicknessPath), velocityPath(velocityPath),
-    thicknessImage(thicknessImage), particleDensity(particleDensity), device(device)
+    thicknessImage(thicknessImage), particleDensity(particleDensity), device(device),
+    AMGconfig(AMGconfig)
 {
     std::cout << "Re^-1 " << re << std::endl;
     std::cout << "S " << S << std::endl;
     std::cout << "Cr " << Cr << std::endl;
     std::cout << "M " << M << std::endl;
+    std::cout << "AMG config file: " << AMGconfig << std::endl;
 }
 Kamino::~Kamino()
 {}
 
 void Kamino::run()
 {
-    KaminoSolver solver(nPhi, nTheta, radius, dt, A, B, C, D, E, H, device);
+    KaminoSolver solver(nPhi, nTheta, radius, dt, H, device, AMGconfig);
     
     checkCudaErrors(cudaMemcpyToSymbol(nPhiGlobal, &(this->nPhi), sizeof(size_t)));
     checkCudaErrors(cudaMemcpyToSymbol(nThetaGlobal, &(this->nTheta), sizeof(size_t)));

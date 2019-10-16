@@ -89,12 +89,12 @@ __global__ void initParticleValues(fReal* particleVal, fReal* particleCoord, fRe
 }
 
 
-__global__ void initLinearSystem(int* row_ptr, int* col_ind, int* row_ptrm, int* col_indm, float* valm) {
+__global__ void initLinearSystem(int* row_ptr, int* col_ind) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    
+
+    if (idx > nPhiGlobal * nThetaGlobal) return;
     int idx5 = 5 * idx;
     row_ptr[idx] = idx5;
-    row_ptrm[idx] = idx;
 
     int n = nPhiGlobal * nThetaGlobal;
     
@@ -125,17 +125,15 @@ __global__ void initLinearSystem(int* row_ptr, int* col_ind, int* row_ptrm, int*
 	} else {
 	    col_ind[idx5 + 4] = idx + nPhiGlobal;
 	}
-	col_indm[idx] = idx;
-	valm[idx] = 1.f; /* identity matrix */
     }
 }
 
 
 KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
-			   fReal A, int B, int C, int D, int E, fReal H, int device) :
+			   fReal H, int device, std::string AMGconfig) :
     nPhi(nPhi), nTheta(nTheta), radius(radius), invRadius(1.0/radius), gridLen(M_2PI / nPhi), invGridLen(1.0 / gridLen), frameDuration(frameDuration),
     timeStep(0.0), timeElapsed(0.0), advectionTime(0.0), bodyforceTime(0.0), CGTime(0.0),
-    A(A), B(B), C(C), D(D), E(E), H(H), epsilon(H/radius), N(nPhi*nTheta), nz(5*N)
+    H(H), epsilon(H/radius), N(nPhi*nTheta), nz(5*N)
 {
     /// FIXME: Should we detect and use device 0?
     /// Replace it later with functions from helper_cuda.h!
@@ -173,12 +171,6 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 			       sizeof(float) * N));
     checkCudaErrors(cudaMalloc((void **)(&val),
 			       sizeof(float) * nz));
-    checkCudaErrors(cudaMalloc((void **)(&row_ptrm),
-			       sizeof(int) * (N + 1)));
-    checkCudaErrors(cudaMalloc((void **)(&col_indm),
-			       sizeof(int) * N));
-    checkCudaErrors(cudaMalloc((void **)(&valm),
-			       sizeof(float) * N));
     
     checkCudaErrors(cudaMalloc((void **)(&gpuA),
 			       sizeof(fReal) * N));
@@ -216,12 +208,12 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     dim3 blockLayout;
 			        
     determineLayout(gridLayout, blockLayout, 1, N + 1);
-    initLinearSystem<<<gridLayout, blockLayout>>>(row_ptr, col_ind, row_ptrm, col_indm, valm);
+    initLinearSystem<<<gridLayout, blockLayout>>>(row_ptr, col_ind);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
     
-    // printGPUarraytoMATLAB<int>("test/row_ptr.txt", row_ptr, N + 1, 1, 1);
-    // printGPUarraytoMATLAB<int>("test/col_ind.txt", col_ind, N, 5, 5);
+    printGPUarraytoMATLAB<int>("test/row_ptr.txt", row_ptr, N + 1, 1, 1);
+    printGPUarraytoMATLAB<int>("test/col_ind.txt", col_ind, N, 5, 5);
     
     // cuSPARSE and cuBLAS
     CHECK_CUBLAS(cublasCreate(&cublasHandle));
@@ -234,11 +226,11 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     CHECK_CUDA(cudaMalloc((void**)&d_omega, N * sizeof(float)));   
 	
     // Create preconditioner and dense vectors
-    CHECK_CUSPARSE(cusparseCreateCsr(&matM, N, N, N, row_ptrm, col_indm,
-    				     valm, CUSPARSE_INDEX_32I,
-    				     CUSPARSE_INDEX_32I,
-    				     CUSPARSE_INDEX_BASE_ZERO,
-    				     CUDA_R_32F));
+    // CHECK_CUSPARSE(cusparseCreateCsr(&matM, N, N, N, row_ptrm, col_indm,
+    // 				     valm, CUSPARSE_INDEX_32I,
+    // 				     CUSPARSE_INDEX_32I,
+    // 				     CUSPARSE_INDEX_BASE_ZERO,
+    // 				     CUDA_R_32F));
     CHECK_CUSPARSE(cusparseCreateDnVec(&vecX, N, d_x, CUDA_R_32F));
     CHECK_CUSPARSE(cusparseCreateDnVec(&vecR, N, d_r, CUDA_R_32F));
     CHECK_CUSPARSE(cusparseCreateDnVec(&vecP, N, d_p, CUDA_R_32F));
@@ -256,6 +248,24 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 					       NULL, 1, nPhi,
 					       NULL, 1, nPhi,
 					       CUFFT_C2C, nTheta));
+
+
+    /* AMGX */
+    int devices[] = {0};
+    const char *AMGconfigFile = AMGconfig.c_str();
+    AMGX_initialize();
+    AMGX_initialize_plugins();
+    //    AMGX_register_print_callback(&print_callback);
+    //    AMGX_install_signal_handler();
+    AMGX_config_create_from_file(&cfg, AMGconfigFile);
+    AMGX_config_add_parameters(&cfg, "exception_handling=1");
+
+    AMGX_resources_create_simple(&res, cfg);
+    mode = AMGX_mode_dFFI;
+    AMGX_solver_create(&solver, res, mode, cfg);
+    AMGX_matrix_create(&A, res, mode);
+    AMGX_vector_create(&b, res, mode);
+    AMGX_vector_create(&x, res, mode);
 }
 
 
@@ -273,14 +283,14 @@ KaminoSolver::~KaminoSolver()
     checkCudaErrors(cudaFree(div));
     checkCudaErrors(cudaFree(weight));
 
-    checkCudaErrors(cudaFree(thicknessFull));
-    checkCudaErrors(cudaFree(weightFull));
+    //    checkCudaErrors(cudaFree(thicknessFull));
+    //    checkCudaErrors(cudaFree(weightFull));
 		    
     checkCudaErrors(cudaFree(gpuA));
     checkCudaErrors(cudaFree(gpuB));
     checkCudaErrors(cudaFree(gpuC));
 
-    CHECK_CUSPARSE(cusparseDestroySpMat(matM));
+    // CHECK_CUSPARSE(cusparseDestroySpMat(matM));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecX));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecR));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecP));
@@ -296,9 +306,6 @@ KaminoSolver::~KaminoSolver()
     CHECK_CUDA(cudaFree(col_ind));
     CHECK_CUDA(cudaFree(rhs));
     CHECK_CUDA(cudaFree(val));
-    CHECK_CUDA(cudaFree(row_ptrm));
-    CHECK_CUDA(cudaFree(col_indm));
-    CHECK_CUDA(cudaFree(valm));
 
     delete this->velPhi;
     delete this->velTheta;
@@ -308,6 +315,16 @@ KaminoSolver::~KaminoSolver()
     delete this->bulkConcentration;
     delete this->surfConcentration;
     delete this->thicknessFullCPU;
+
+    /* AMGX */
+    AMGX_config_destroy(cfg);
+    AMGX_resources_destroy(res);
+    AMGX_solver_destroy(solver);
+    AMGX_matrix_destroy(A);
+    AMGX_vector_destroy(b);
+    AMGX_vector_destroy(x);
+    AMGX_finalize_plugins();
+    AMGX_finalize();
 
 # ifdef WRITE_PARTICLES
     delete this->particles;
@@ -555,26 +572,26 @@ void KaminoSolver::initThicknessfromPic(std::string path, size_t particleDensity
     
 	    this->rows = image_Flipped.rows;
 	    this->cols = image_Flipped.cols;
-	    int ratio = this->rows / nTheta;
-	    checkCudaErrors(cudaMemcpyToSymbol(Cols, &(this->cols), sizeof(int)));
-	    checkCudaErrors(cudaMemcpyToSymbol(Rows, &(this->rows), sizeof(int)));
-	    checkCudaErrors(cudaMemcpyToSymbol(Ratio, &ratio, sizeof(int)));
+	    // int ratio = this->rows / nTheta;
+	    // checkCudaErrors(cudaMemcpyToSymbol(Cols, &(this->cols), sizeof(int)));
+	    // checkCudaErrors(cudaMemcpyToSymbol(Rows, &(this->rows), sizeof(int)));
+	    // checkCudaErrors(cudaMemcpyToSymbol(Ratio, &ratio, sizeof(int)));
 
-	    thicknessFullCPU = new fReal[rows * cols];
-	    checkCudaErrors(cudaMalloc((void **)&thicknessFull,
-				       sizeof(fReal) * rows * cols));
-	    checkCudaErrors(cudaMalloc((void **)(&weightFull),
-				       sizeof(float2) * rows * cols));
+	    // thicknessFullCPU = new fReal[rows * cols];
+	    // checkCudaErrors(cudaMalloc((void **)&thicknessFull,
+	    // 			       sizeof(fReal) * rows * cols));
+	    // checkCudaErrors(cudaMalloc((void **)(&weightFull),
+	    // 			       sizeof(float2) * rows * cols));
 
-	    for (int i = 0; i < cols; ++i) {
-		for (int j = 0; j < rows; ++j) {
-		    cv::Point3_<float>* p = image_Flipped.ptr<cv::Point3_<float>>(j, i);
-		    fReal C = p->x; // Gray Scale
-		    thicknessFullCPU[j * cols + i] = C;
-		}
-	    }
+	    // for (int i = 0; i < cols; ++i) {
+	    // 	for (int j = 0; j < rows; ++j) {
+	    // 	    cv::Point3_<float>* p = image_Flipped.ptr<cv::Point3_<float>>(j, i);
+	    // 	    fReal C = p->x; // Gray Scale
+	    // 	    thicknessFullCPU[j * cols + i] = C;
+	    // 	}
+	    // }
 
-	    cudaMemcpy(thicknessFull, thicknessFullCPU, (cols * rows) * sizeof(fReal), cudaMemcpyHostToDevice);
+	    // cudaMemcpy(thicknessFull, thicknessFullCPU, (cols * rows) * sizeof(fReal), cudaMemcpyHostToDevice);
    	}
 
     }    

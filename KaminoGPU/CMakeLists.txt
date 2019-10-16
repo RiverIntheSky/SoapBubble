@@ -15,14 +15,16 @@ link_directories(/lib/x86_64-linux-gnu/)
 include_directories(${ZLIB_INCLUDE_DIRS})
 link_directories(${ZLIB_LIBRARIES})
 
-set(CMAKE_C_COMPILER /usr/bin/gcc-6)
-set(CMAKE_CXX_COMPILER  /usr/bin/g++-6)
+set(CMAKE_C_COMPILER /usr/bin/cc)
+set(CMAKE_CXX_COMPILER  /usr/bin/c++)
 # set(CMAKE_CXX_FLAGS "-Wall -Wextra -std=c++0x")
-set(CUDA_HOST_COMPILER  /usr/bin/g++-6)
+set(CMAKE_CXX_FLAGS "-std=c++0x")
+
 find_package(CUDA REQUIRED)
-include_directories(/opt/cuda/include)
-include_directories(/opt/cuda/samples/common/inc)
+# find_package(CUDA REQUIRED)
+include_directories(${CUDA_TOOLKIT_INCLUDE})
 link_directories(/opt/cuda/lib64)
+set(CUDA_HOST_COMPILER  /usr/bin/cc)
 set(CUDA_SEPARABLE_COMPILATION ON)
 
 set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-g -G -use_fast_math -gencode arch=compute_61,code=sm_61;)
@@ -55,4 +57,5 @@ target_link_libraries(kamino
   cublas
   cudadevrt
   cufft
+  amgxsh
   )

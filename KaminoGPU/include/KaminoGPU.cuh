@@ -1,33 +1,61 @@
 # pragma once
 
-# include "KaminoSolver.cuh"
+# include "../include/KaminoHeader.cuh"
 # include <opencv2/opencv.hpp>
+
+#define CHECK_CUDA(func)						\
+    {									\
+	cudaError_t status = (func);					\
+	if (status != cudaSuccess) {					\
+	    printf("CUDA API failed at line %d with error: %s (%d)\n",	\
+		   __LINE__, cudaGetErrorString(status), status);	\
+	}								\
+    }
+
+
+#define CHECK_CUSPARSE(func)						\
+    {									\
+	cusparseStatus_t status = (func);				\
+	if (status != CUSPARSE_STATUS_SUCCESS) {			\
+	    printf("CUSPARSE API failed at line %d with error: %s (%d)\n", \
+		   __LINE__, cusparseGetErrorString(status), status);	\
+	}								\
+    }
+
+
+// TODO
+#define CHECK_CUBLAS(func)						\
+    {									\
+ 	cublasStatus_t status = (func);					\
+	checkCudaErrors(status);					\
+    }
+
 
 using namespace cv;
 
 class Kamino
 {
 private:
-    fReal radius;               // radius of sphere. m
-    fReal invRadius;		// inverted radius of sphere. m^-1
-    fReal H;			// characteristic film thickness. m
-    fReal U;			// characteristic flow velocity. m s^-1
-    fReal c_m;			// bulk mean concentration. mol m^-3
-    fReal Gamma_m;		// surface mean concentration. mol m^-2
-    fReal T;			// room temperature. K
-    fReal Ds;			// soap diffusivity. m^2 s^-1
-    fReal gs;                   // nondimensional gravity
-    fReal rm;			// Van der Waals constant
-    fReal epsilon;		// expansion parameter
-    fReal sigma_r;		// accounts for the elasticity of the film.
-    fReal M;			// M.
-    fReal S;			// S.
-    fReal re;			// reciprocal value of Reynolds constant
-    fReal Cr;			// air friction constant
+    float radius;               // radius of sphere. m
+    float invRadius;		// inverted radius of sphere. m^-1
+    float H;			// characteristic film thickness. m
+    float U;			// characteristic flow velocity. m s^-1
+    float c_m;			// bulk mean concentration. mol m^-3
+    float Gamma_m;		// surface mean concentration. mol m^-2
+    float T;			// room temperature. K
+    float Ds;			// soap diffusivity. m^2 s^-1
+    float gs;                   // nondimensional gravity
+    float rm;			// Van der Waals constant
+    float epsilon;		// expansion parameter
+    float sigma_r;		// accounts for the elasticity of the film.
+    float M;			// M.
+    float S;			// S.
+    float re;			// reciprocal value of Reynolds constant
+    float Cr;			// air friction constant
     size_t nTheta;              // number of grid cells in u direction
     size_t nPhi;                // number of grid cells in v direction
-    fReal gridLen;              // grid spacing (square in uv plane)
-    fReal invGridLen;		// inverted grid spacing
+    float gridLen;              // grid spacing (square in uv plane)
+    float invGridLen;		// inverted grid spacing
     
     /* practical condition: dt <= 5*dx / u_max */
     /* dt should be less than DT as well */
@@ -39,8 +67,8 @@ private:
     /* u = A + sin(B*phi / 2) * sin(C*theta / 2) */
     /* v = sin(D*phi / 2) * sin(E*theta / 2) */
     /* coefficients are for Fourier sums representing each of the above functions */
-    fReal A;
-    int B, C, D, E;
+    // float A;
+    // int B, C, D, E;
     
     std::string thicknessPath;	  // folder destination thickness output
     std::string velocityPath;     // folder destination velocity output
@@ -49,17 +77,18 @@ private:
     std::string solidImage;	  // file path of SOLIDCELL image map
     std::string colorImage;       // file path of image defining particle color
 
-    fReal particleDensity;	  // how many particles in a grid cell
+    float particleDensity;	  // how many particles in a grid cell
     int device;			  // which gpu device to use
+    std::string AMGconfig;        // AMGX config file
 
 public:
-    Kamino(fReal radius = 0.05, fReal H = 0.0000005, fReal U = 1.0, fReal c_m = 0.5,
-	   fReal Gamma_m = 0.000001, fReal T = 298.15, fReal Ds = 0.01,
-	   fReal rm = 0.000000005,size_t nTheta = 128, float dt = 0.005,
+    Kamino(float radius = 0.05, float H = 0.0000005, float U = 1.0, float c_m = 0.5,
+	   float Gamma_m = 0.000001, float T = 298.15, float Ds = 0.01,
+	   float rm = 0.000000005,size_t nTheta = 128, float dt = 0.005,
 	   float DT = 1.0 / 24.0, int frames = 1000,
-	   fReal A = 0.0, int B = 1, int C = 1, int D = 1, int E = 1,
 	   std::string thicknessPath = "output/frame", std::string velocityPath = "output/vel",
-	   std::string thicknessImage = "", size_t particleDensity = 8, int device = 0);
+	   std::string thicknessImage = "", size_t particleDensity = 8, int device = 0,
+	   std::string AMGconfig = "");
     ~Kamino();
 
     /* run the solver */

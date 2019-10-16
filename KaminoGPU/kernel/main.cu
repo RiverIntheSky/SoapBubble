@@ -8,14 +8,14 @@ int main(int argc, char** argv)
 	    std::string configFile = argv[1];
 	    std::fstream fin;
 	    fin.open(configFile, std::ios::in);
-	    fReal r; fReal H; fReal U; fReal c_m;
-	    fReal Gamma_m; fReal T; fReal Ds;
-	    fReal rm; size_t nTheta;
+	    float r; float H; float U; float c_m;
+	    float Gamma_m; float T; float Ds;
+	    float rm; size_t nTheta;
 	    float dt; float DT; int frames;
-	    float A; int B; int C; int D; int E;
 	    std::string thicknessPath; std::string velocityPath;
 	    std::string thicknessImage; size_t particleDensity;
 	    std::string attrib; int device;
+	    std::string AMGconfig;
 
 	    fin >> attrib;  fin >> r;
 	    fin >> attrib;  fin >> H;
@@ -29,25 +29,23 @@ int main(int argc, char** argv)
 	    fin >> attrib;  fin >> dt;
 	    fin >> attrib;  fin >> DT;
 	    fin >> attrib;  fin >> frames;
-	    fin >> attrib;  fin >> A;
-	    fin >> attrib;  fin >> B;
-	    fin >> attrib;  fin >> C;
-	    fin >> attrib;  fin >> D;
-	    fin >> attrib;  fin >> E;
 	    fin >> attrib;  fin >> thicknessPath;
 	    fin >> attrib;  fin >> velocityPath;
 	    fin >> attrib;  fin >> thicknessImage;
+	    fin >> attrib;  fin >> AMGconfig;
 	    fin >> attrib;  fin >> particleDensity;
 	    fin >> attrib;  fin >> device;
-	
+
+
 	    if (thicknessImage == "null")
 		{
 		    thicknessImage = "";
 		}
 
-	    Kamino KaminoInstance(r, H, U, c_m, Gamma_m, T, Ds, rm,
-				  nTheta, dt, DT, frames, A, B, C, D, E,
-				  thicknessPath, velocityPath, thicknessImage, particleDensity, device);
+	    Kamino KaminoInstance(r, H, U, c_m, Gamma_m, T, Ds, rm, nTheta,
+				  dt, DT, frames,
+				  thicknessPath, velocityPath, thicknessImage,
+				  particleDensity, device, AMGconfig);
 	    KaminoInstance.run();
 	    return 0;
 	}
