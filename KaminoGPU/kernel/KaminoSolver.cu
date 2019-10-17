@@ -15,77 +15,12 @@ static __constant__ int Rows;
 static __constant__ int Ratio;
 
 
-__device__ fReal sampleThickness(fReal* input, fReal phiRawId, fReal thetaRawId) {
-    fReal phi = phiRawId - centeredPhiOffset;
-    fReal theta = thetaRawId - centeredThetaOffset;
-    // Phi and Theta are now shifted back to origin
-
-    // if (thetaRawId > nThetaGlobal)
-    // 	printf("theta %f\n", theta);
-    // TODO change for particles
-    size_t nPhi = static_cast<size_t>(Cols);
-    bool isFlippedPole = validateCoord(phi, theta, nPhi);
-
-    int phiIndex = static_cast<int>(floorf(phi));
-    int thetaIndex = static_cast<int>(floorf(theta));
-    fReal alphaPhi = phi - static_cast<fReal>(phiIndex);
-    fReal alphaTheta = theta - static_cast<fReal>(thetaIndex);
-
-    if (thetaIndex == 0 && isFlippedPole) {
-	size_t phiLower = phiIndex % Cols;
-	size_t phiHigher = (phiLower + 1) % Cols;
-	fReal higherBelt = kaminoLerp(input[phiLower + Cols * thetaIndex],
-				      input[phiHigher + Cols * thetaIndex], alphaPhi);
-
-	phiLower = (phiLower + Cols / 2) % Cols;
-	phiHigher = (phiHigher + Cols / 2) % Cols;
-	fReal lowerBelt = kaminoLerp(input[phiLower + Cols * thetaIndex],
-				     input[phiHigher + Cols * thetaIndex], alphaPhi);
-
-	fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
-	return lerped;
-    }
-    
-    if (isFlippedPole) {
-	thetaIndex -= 1;
-    }
-    
-    if (thetaIndex == Rows - 1) {
-	size_t phiLower = phiIndex % Cols;
-	size_t phiHigher = (phiLower + 1) % Cols;
-	fReal lowerBelt = kaminoLerp(input[phiLower + Cols * thetaIndex],
-				     input[phiHigher + Cols * thetaIndex], alphaPhi);
-
-	phiLower = (phiLower + Cols / 2) % Cols;
-	phiHigher = (phiHigher + Cols / 2) % Cols;
-	fReal higherBelt = kaminoLerp(input[phiLower + Cols * thetaIndex],
-				      input[phiHigher + Cols * thetaIndex], alphaPhi);
-
-	fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
-	return lerped;
-    }
-
-    size_t phiLower = phiIndex % Cols;
-    size_t phiHigher = (phiLower + 1) % Cols;
-    size_t thetaLower = thetaIndex;
-    size_t thetaHigher = thetaIndex + 1;
-
-    fReal lowerBelt = kaminoLerp(input[phiLower + Cols * thetaLower],
-				 input[phiHigher + Cols * thetaLower], alphaPhi);
-    fReal higherBelt = kaminoLerp(input[phiLower + Cols * thetaHigher],
-				  input[phiHigher + Cols * thetaHigher], alphaPhi);
-
-    fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
-    return lerped;
-}
-
-
-__global__ void initParticleValues(fReal* particleVal, fReal* particleCoord, fReal* thickness) {
+__global__ void initParticleValues(fReal* particleVal, fReal* particleCoord, fReal* thickness, size_t pitch) {
     int particleId = blockIdx.x * blockDim.x + threadIdx.x;
-    fReal phiId = particleCoord[2 * particleId] * Ratio;
-    fReal thetaId = particleCoord[2 * particleId + 1] * Ratio;
+    fReal phiId = particleCoord[2 * particleId];
+    fReal thetaId = particleCoord[2 * particleId + 1];
 
-    particleVal[particleId] = sampleThickness(thickness, phiId, thetaId);
+    particleVal[particleId] = sampleCentered(thickness, phiId, thetaId, pitch);
 }
 
 
@@ -142,22 +77,6 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     cudaDeviceProp deviceProp;
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, device));
     this->nThreadxMax = deviceProp.maxThreadsDim[0];
-    
-    checkCudaErrors(cudaMalloc((void **)&gpuUFourier,
-			       sizeof(ComplexFourier) * N));
-    checkCudaErrors(cudaMalloc((void **)&gpuUReal,
-			       sizeof(fReal) * N));
-    checkCudaErrors(cudaMalloc((void **)&gpuUImag,
-			       sizeof(fReal) * N));
-
-    checkCudaErrors(cudaMalloc((void **)&gpuFFourier,
-			       sizeof(ComplexFourier) * N));
-    checkCudaErrors(cudaMalloc((void **)&gpuFReal,
-			       sizeof(fReal) * N));
-    checkCudaErrors(cudaMalloc((void **)&gpuFImag,
-			       sizeof(fReal) * N));
-    checkCudaErrors(cudaMalloc((void**)&gpuFZeroComponent,
-			       sizeof(fReal) * nTheta));
 
     checkCudaErrors(cudaMalloc((void **)(&div),
 			       sizeof(fReal) * N));
@@ -171,13 +90,6 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 			       sizeof(float) * N));
     checkCudaErrors(cudaMalloc((void **)(&val),
 			       sizeof(float) * nz));
-    
-    checkCudaErrors(cudaMalloc((void **)(&gpuA),
-			       sizeof(fReal) * N));
-    checkCudaErrors(cudaMalloc((void **)(&gpuB),
-			       sizeof(fReal) * N));
-    checkCudaErrors(cudaMalloc((void **)(&gpuC),
-			       sizeof(fReal) * N));
 
     checkCudaErrors(cudaMemcpyToSymbol(nPhiGlobal, &(this->nPhi), sizeof(size_t)));
     checkCudaErrors(cudaMemcpyToSymbol(nThetaGlobal, &(this->nTheta), sizeof(size_t)));
@@ -186,14 +98,8 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 				      vPhiPhiOffset, vPhiThetaOffset);
     this->velTheta = new KaminoQuantity("velTheta", nPhi, nTheta - 1,
 					vThetaPhiOffset, vThetaThetaOffset);
-    this->pressure = new KaminoQuantity("p", nPhi, nTheta,
-					centeredPhiOffset, centeredThetaOffset);
-    this->density = new KaminoQuantity("density", nPhi, nTheta,
-				       centeredPhiOffset, centeredThetaOffset);
     this->thickness = new KaminoQuantity("eta", nPhi, nTheta,
 					 centeredPhiOffset, centeredThetaOffset);
-    this->bulkConcentration = new KaminoQuantity("c", nPhi, nTheta,
-						 centeredPhiOffset, centeredThetaOffset);
     this->surfConcentration = new KaminoQuantity("gamma", nPhi, nTheta,
 						 centeredPhiOffset, centeredThetaOffset);
 			   				   
@@ -258,39 +164,26 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     //    AMGX_register_print_callback(&print_callback);
     //    AMGX_install_signal_handler();
     AMGX_config_create_from_file(&cfg, AMGconfigFile);
-    AMGX_config_add_parameters(&cfg, "exception_handling=1");
-
     AMGX_resources_create_simple(&res, cfg);
     mode = AMGX_mode_dFFI;
-    AMGX_solver_create(&solver, res, mode, cfg);
     AMGX_matrix_create(&A, res, mode);
     AMGX_vector_create(&b, res, mode);
     AMGX_vector_create(&x, res, mode);
+    AMGX_solver_create(&solver, res, mode, cfg);
 }
 
 
 KaminoSolver::~KaminoSolver()
 {
-    checkCudaErrors(cudaFree(gpuUFourier));
-    checkCudaErrors(cudaFree(gpuUReal));
-    checkCudaErrors(cudaFree(gpuUImag));
-
-    checkCudaErrors(cudaFree(gpuFFourier));
-    checkCudaErrors(cudaFree(gpuFReal));
-    checkCudaErrors(cudaFree(gpuFImag));
-    checkCudaErrors(cudaFree(gpuFZeroComponent));
-
     checkCudaErrors(cudaFree(div));
     checkCudaErrors(cudaFree(weight));
-
-    //    checkCudaErrors(cudaFree(thicknessFull));
-    //    checkCudaErrors(cudaFree(weightFull));
-		    
-    checkCudaErrors(cudaFree(gpuA));
-    checkCudaErrors(cudaFree(gpuB));
-    checkCudaErrors(cudaFree(gpuC));
+    CHECK_CUDA(cudaFree(row_ptr));
+    CHECK_CUDA(cudaFree(col_ind));
+    CHECK_CUDA(cudaFree(rhs));
+    CHECK_CUDA(cudaFree(val));
 
     // CHECK_CUSPARSE(cusparseDestroySpMat(matM));
+    CHECK_CUSPARSE(cusparseDestroyMatDescr(descrA));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecX));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecR));
     CHECK_CUSPARSE(cusparseDestroyDnVec(vecP));
@@ -302,27 +195,20 @@ KaminoSolver::~KaminoSolver()
     CHECK_CUDA(cudaFree(d_x));
     CHECK_CUDA(cudaFree(d_p));
     CHECK_CUDA(cudaFree(d_omega));
-    CHECK_CUDA(cudaFree(row_ptr));
-    CHECK_CUDA(cudaFree(col_ind));
-    CHECK_CUDA(cudaFree(rhs));
-    CHECK_CUDA(cudaFree(val));
+
 
     delete this->velPhi;
     delete this->velTheta;
-    delete this->pressure;
-    delete this->density;
     delete this->thickness;
-    delete this->bulkConcentration;
     delete this->surfConcentration;
-    delete this->thicknessFullCPU;
 
-    /* AMGX */
-    AMGX_config_destroy(cfg);
-    AMGX_resources_destroy(res);
+    /* AMGX */    
     AMGX_solver_destroy(solver);
-    AMGX_matrix_destroy(A);
     AMGX_vector_destroy(b);
     AMGX_vector_destroy(x);
+    AMGX_matrix_destroy(A);
+    AMGX_resources_destroy(res);
+    AMGX_config_destroy(cfg);
     AMGX_finalize_plugins();
     AMGX_finalize();
 
@@ -572,28 +458,7 @@ void KaminoSolver::initThicknessfromPic(std::string path, size_t particleDensity
     
 	    this->rows = image_Flipped.rows;
 	    this->cols = image_Flipped.cols;
-	    // int ratio = this->rows / nTheta;
-	    // checkCudaErrors(cudaMemcpyToSymbol(Cols, &(this->cols), sizeof(int)));
-	    // checkCudaErrors(cudaMemcpyToSymbol(Rows, &(this->rows), sizeof(int)));
-	    // checkCudaErrors(cudaMemcpyToSymbol(Ratio, &ratio, sizeof(int)));
-
-	    // thicknessFullCPU = new fReal[rows * cols];
-	    // checkCudaErrors(cudaMalloc((void **)&thicknessFull,
-	    // 			       sizeof(fReal) * rows * cols));
-	    // checkCudaErrors(cudaMalloc((void **)(&weightFull),
-	    // 			       sizeof(float2) * rows * cols));
-
-	    // for (int i = 0; i < cols; ++i) {
-	    // 	for (int j = 0; j < rows; ++j) {
-	    // 	    cv::Point3_<float>* p = image_Flipped.ptr<cv::Point3_<float>>(j, i);
-	    // 	    fReal C = p->x; // Gray Scale
-	    // 	    thicknessFullCPU[j * cols + i] = C;
-	    // 	}
-	    // }
-
-	    // cudaMemcpy(thicknessFull, thicknessFullCPU, (cols * rows) * sizeof(fReal), cudaMemcpyHostToDevice);
    	}
-
     }    
 
     this->particles = new KaminoParticles(path, particleDensity, gridLen, nTheta);
@@ -603,7 +468,8 @@ void KaminoSolver::initThicknessfromPic(std::string path, size_t particleDensity
 	dim3 blockLayout;
 	determineLayout(gridLayout, blockLayout, 1, this->particles->numOfParticles);
 	initParticleValues<<<gridLayout, blockLayout>>>
-	    (this->particles->value, this->particles->coordGPUThisStep, thicknessFull);
+	    (this->particles->value, this->particles->coordGPUThisStep, this->thickness->getGPUThisStep(),
+	     this->thickness->getThisStepPitchInElements());
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());	
     }

@@ -1804,10 +1804,12 @@ void KaminoSolver::bodyforce() {
     this->CGTime += CGtimer.stopTimer() * 0.001f;
 # endif  
 
+    determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
     applyforcevelthetaKernel<<<gridLayout, blockLayout>>>
     	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), thickness->getGPUThisStep(), surfConcentration->getGPUNextStep(), velTheta->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
 
+    determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
     applyforcevelphiKernel<<<gridLayout, blockLayout>>>
     	(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(), thickness->getGPUThisStep(), surfConcentration->getGPUNextStep(), velPhi->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
@@ -1839,7 +1841,7 @@ void KaminoSolver::bodyforce() {
 
     	determineLayout(gridLayout, blockLayout, 2, particles->numOfParticles);
     	mapParticlesToThickness<<<gridLayout, blockLayout>>>
-    	    (particles->coordGPUThisStep, particles->tempVal,  weight, particles->numOfParticles);
+    	    (particles->coordGPUThisStep, particles->tempVal, weight, particles->numOfParticles);
     	checkCudaErrors(cudaGetLastError());
     	checkCudaErrors(cudaDeviceSynchronize());
     }
