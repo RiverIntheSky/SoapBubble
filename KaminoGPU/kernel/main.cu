@@ -12,7 +12,7 @@ int main(int argc, char** argv)
 	    float Gamma_m; float T; float Ds;
 	    float rm; size_t nTheta;
 	    float dt; float DT; int frames;
-	    std::string thicknessPath; std::string velocityPath;
+	    std::string outputDir;
 	    std::string thicknessImage; size_t particleDensity;
 	    std::string attrib; int device;
 	    std::string AMGconfig;
@@ -29,8 +29,7 @@ int main(int argc, char** argv)
 	    fin >> attrib;  fin >> dt;
 	    fin >> attrib;  fin >> DT;
 	    fin >> attrib;  fin >> frames;
-	    fin >> attrib;  fin >> thicknessPath;
-	    fin >> attrib;  fin >> velocityPath;
+	    fin >> attrib;  fin >> outputDir;
 	    fin >> attrib;  fin >> thicknessImage;
 	    fin >> attrib;  fin >> AMGconfig;
 	    fin >> attrib;  fin >> particleDensity;
@@ -43,8 +42,7 @@ int main(int argc, char** argv)
 		}
 
 	    Kamino KaminoInstance(r, H, U, c_m, Gamma_m, T, Ds, rm, nTheta,
-				  dt, DT, frames,
-				  thicknessPath, velocityPath, thicknessImage,
+				  dt, DT, frames, outputDir, thicknessImage,
 				  particleDensity, device, AMGconfig);
 	    KaminoInstance.run();
 	    return 0;

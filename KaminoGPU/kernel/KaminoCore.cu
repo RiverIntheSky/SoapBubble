@@ -1,6 +1,7 @@
 # include "KaminoSolver.cuh"
 # include "KaminoGPU.cuh"
 # include "KaminoTimer.cuh"
+#include <boost/filesystem.hpp>
 
 __constant__ fReal invGridLenGlobal;
 static __constant__ size_t nPhiGlobal;
@@ -1860,19 +1861,21 @@ void KaminoSolver::bodyforce() {
 Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
 	       fReal T, fReal Ds, fReal rm, size_t nTheta, 
 	       float dt, float DT, int frames,
-	       std::string thicknessPath, std::string velocityPath,
-	       std::string thicknessImage, size_t particleDensity, int device,
+	       std::string outputDir, std::string thicknessImage,
+	       size_t particleDensity, int device,
 	       std::string AMGconfig):
     radius(radius), invRadius(1/radius), H(H), U(U), c_m(c_m), Gamma_m(Gamma_m), T(T),
     Ds(Ds/(U*radius)), gs(g*radius/(U*U)), rm(rm), epsilon(H/radius), sigma_r(R*T), M(Gamma_m*sigma_r/(3*rho*H*U*U)),
     S(sigma_a*epsilon/(2*mu*U)), re(mu/(U*radius*rho)), Cr(rhoa*sqrt(nua*radius/U)/(rho*H)),
     nTheta(nTheta), nPhi(2 * nTheta),
     gridLen(M_PI / nTheta), invGridLen(nTheta / M_PI), 
-    dt(dt*U/radius), DT(DT), frames(frames),
-    thicknessPath(thicknessPath), velocityPath(velocityPath),
+    dt(dt*U/radius), DT(DT), frames(frames), outputDir(outputDir),
     thicknessImage(thicknessImage), particleDensity(particleDensity), device(device),
     AMGconfig(AMGconfig)
 {
+    boost::filesystem::create_directories(outputDir);
+    if (outputDir.back() != '/')
+	this->outputDir.append("/");
     std::cout << "Re^-1 " << re << std::endl;
     std::cout << "S " << S << std::endl;
     std::cout << "Cr " << Cr << std::endl;
@@ -1904,14 +1907,13 @@ void Kamino::run()
     solver.initThicknessfromPic(thicknessImage, this->particleDensity);
 
 # ifdef WRITE_THICKNESS_DATA
-    solver.write_thickness_img(thicknessPath, 0);
+    solver.write_thickness_img(outputDir, 0);
 # endif  
 # ifdef WRITE_VELOCITY_DATA
-    solver.write_velocity_image(velocityPath, 0);
-    size_t split = velocityPath.find("/");
-    std::string concentrationPath = velocityPath;
-    concentrationPath.replace(concentrationPath.begin() + split + 1, concentrationPath.end(), "con");
-    solver.write_concentration_image(concentrationPath, 0);
+    solver.write_velocity_image(outputDir, 0);
+# endif  
+# ifdef WRITE_CONCENTRATION_DATA
+    solver.write_concentration_image(outputDir, 0);
 # endif
 
 # ifdef PERFORMANCE_BENCHMARK
@@ -1946,12 +1948,15 @@ void Kamino::run()
 	T = i*DT;
 
 	std::cout << "Frame " << i << " is ready" << std::endl;
+
 # ifdef WRITE_THICKNESS_DATA
-	solver.write_thickness_img(thicknessPath, i);
-# endif
+    solver.write_thickness_img(outputDir, i);
+# endif  
 # ifdef WRITE_VELOCITY_DATA
-	solver.write_velocity_image(velocityPath, i);
-	solver.write_concentration_image(concentrationPath, i);
+    solver.write_velocity_image(outputDir, i);
+# endif  
+# ifdef WRITE_CONCENTRATION_DATA
+    solver.write_concentration_image(outputDir, i);
 # endif
     }
 

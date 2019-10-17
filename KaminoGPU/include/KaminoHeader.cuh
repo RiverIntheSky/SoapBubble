@@ -65,6 +65,7 @@ enum Coord { phi, theta };
 # define WRITE_VELOCITY_DATA
 // # define WRITE_PARTICLES
 # define WRITE_THICKNESS_DATA
+# define WRITE_CONCENTRATION_DATA
 # define RUNGE_KUTTA
 # define PERFORMANCE_BENCHMARK
 # define TINYEXR_IMPLEMENTATION
@@ -72,3 +73,4 @@ enum Coord { phi, theta };
 # define gravity
 // # define uair
 // # define vair
+ 

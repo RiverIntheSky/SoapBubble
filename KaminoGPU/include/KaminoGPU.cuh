@@ -70,23 +70,22 @@ private:
     // float A;
     // int B, C, D, E;
     
-    std::string thicknessPath;	  // folder destination thickness output
-    std::string velocityPath;     // folder destination velocity output
+    std::string outputDir;	// folder destination output
 
-    std::string thicknessImage;	  // file path of thickness image initialization
-    std::string solidImage;	  // file path of SOLIDCELL image map
-    std::string colorImage;       // file path of image defining particle color
+    std::string thicknessImage;	// file path of thickness image initialization
+    std::string solidImage;	// file path of SOLIDCELL image map
+    std::string colorImage;     // file path of image defining particle color
 
-    float particleDensity;	  // how many particles in a grid cell
-    int device;			  // which gpu device to use
-    std::string AMGconfig;        // AMGX config file
+    float particleDensity;	// how many particles in a grid cell
+    int device;			// which gpu device to use
+    std::string AMGconfig;	// AMGX config file
 
 public:
     Kamino(float radius = 0.05, float H = 0.0000005, float U = 1.0, float c_m = 0.5,
 	   float Gamma_m = 0.000001, float T = 298.15, float Ds = 0.01,
 	   float rm = 0.000000005,size_t nTheta = 128, float dt = 0.005,
 	   float DT = 1.0 / 24.0, int frames = 1000,
-	   std::string thicknessPath = "output/frame", std::string velocityPath = "output/vel",
+	   std::string outputDir = "../output/test/",
 	   std::string thicknessImage = "", size_t particleDensity = 8, int device = 0,
 	   std::string AMGconfig = "");
     ~Kamino();

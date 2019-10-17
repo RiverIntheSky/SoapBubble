@@ -671,7 +671,7 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
     while (img_string.length() < 4) {
 	img_string.insert(0, "0");
     }
-    img_string.insert(0, s);
+    img_string.insert(0, s + "vel");
     std::string u_string = img_string;
     std::string v_string = img_string;
     img_string.append(".exr");
@@ -776,7 +776,7 @@ void KaminoSolver::write_concentration_image(const std::string& s, const int fra
     while (img_string.length() < 4) {
 	img_string.insert(0, "0");
     }
-    img_string.insert(0, s);
+    img_string.insert(0, s + "con");
     std::string mat_string = img_string;
     img_string.append(".exr");
     mat_string.append(".txt");
@@ -925,7 +925,7 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
     while (img_string.length() < 4) {
 	img_string.insert(0, "0");
     }
-    img_string.insert(0, s);
+    img_string.insert(0, s + "frame");
     std::string mat_string = img_string;
     img_string.append(".exr");
     mat_string.append(".txt");

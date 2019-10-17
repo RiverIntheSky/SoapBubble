@@ -10,9 +10,8 @@ numberOfGridsInTheta 256
 timePerStep 0.001
 timePerFrame 0.02
 frameNumbers 500
-thicknessSave ../out/test/frame
-velocitySave  ../out/test/vel
-thicknessInit ../init/thickness256.exr
+outputDir ../out/test
+thicknessInit ../init/thickness64.exr
 AMGconfig ../init/PCGF_F.json
 particleDensity 0
 gpu 0

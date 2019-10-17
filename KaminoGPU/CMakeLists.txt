@@ -30,6 +30,10 @@ set(CUDA_SEPARABLE_COMPILATION ON)
 set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-g -G -use_fast_math -gencode arch=compute_61,code=sm_61;)
 message("arch=61")
 
+find_package(Boost COMPONENTS filesystem REQUIRED)
+include_directories(${Boost_INCLUDE_DIR})
+link_directories(${Boost_LIBRARY_DIR})
+
 option(BUILD_TESTS "Build the tests" ON)
 if(BUILD_TESTS)
     add_subdirectory(tests)
@@ -58,4 +62,5 @@ target_link_libraries(kamino
   cudadevrt
   cufft
   amgxsh
+  ${Boost_LIBRARIES}
   )
