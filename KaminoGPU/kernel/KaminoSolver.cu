@@ -161,8 +161,6 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     const char *AMGconfigFile = AMGconfig.c_str();
     AMGX_initialize();
     AMGX_initialize_plugins();
-    //    AMGX_register_print_callback(&print_callback);
-    //    AMGX_install_signal_handler();
     AMGX_config_create_from_file(&cfg, AMGconfigFile);
     AMGX_resources_create_simple(&res, cfg);
     mode = AMGX_mode_dFFI;
