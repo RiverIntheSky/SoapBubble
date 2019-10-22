@@ -3,24 +3,24 @@
 # include "KaminoTimer.cuh"
 #include <boost/filesystem.hpp>
 
-__constant__ fReal invGridLenGlobal;
+__constant__ float invGridLenGlobal;
 static __constant__ size_t nPhiGlobal;
 static __constant__ size_t nThetaGlobal;
-static __constant__ fReal invRadiusGlobal;
-static __constant__ fReal radiusGlobal;
-static __constant__ fReal timeStepGlobal;
-static __constant__ fReal currentTimeGlobal;
-static __constant__ fReal gridLenGlobal;
-static __constant__ fReal SGlobal;
-static __constant__ fReal MGlobal;
-static __constant__ fReal reGlobal;
-static __constant__ fReal gGlobal;
-static __constant__ fReal DsGlobal;
-static __constant__ fReal CrGlobal;
-static __constant__ fReal UGlobal;
+static __constant__ float invRadiusGlobal;
+static __constant__ float radiusGlobal;
+static __constant__ float timeStepGlobal;
+static __constant__ float currentTimeGlobal;
+static __constant__ float gridLenGlobal;
+static __constant__ float SGlobal;
+static __constant__ float MGlobal;
+static __constant__ float reGlobal;
+static __constant__ float gGlobal;
+static __constant__ float DsGlobal;
+static __constant__ float CrGlobal;
+static __constant__ float UGlobal;
 
 
-#define eps 1e-7f
+#define eps 1e-5f
 
 __device__ bool validateCoord(fReal& phi, fReal& theta, size_t& nPhi) {
     bool ret = false;
@@ -43,6 +43,7 @@ __device__ bool validateCoord(fReal& phi, fReal& theta, size_t& nPhi) {
     phi = fmod(phi + nPhi, (fReal)nPhi);
     return ret;
 }
+
 
 __device__ fReal kaminoLerp(fReal from, fReal to, fReal alpha)
 {
@@ -247,6 +248,50 @@ __device__ fReal sampleCentered(fReal* input, fReal phiRawId, fReal thetaRawId, 
 
     fReal lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
     return lerped;
+}
+
+
+// return (vTheta, \frac{uPhi}{\sin\theta})
+inline __device__ float2 getVelocity(float* velPhi, float* velTheta, float2 &Id, size_t pitch){
+# ifdef sphere
+    float sinTheta = max(sinf(Id.x * gridLenGlobal), eps); // in case sinTheta is close to zero
+# else
+    float sinTheta = 1.f; // no effect
+# endif
+    return make_float2(sampleVTheta(velTheta, Id.y, Id.x, pitch),
+		       sampleVPhi(velPhi, Id.y, Id.x, pitch) / sinTheta);
+}
+
+
+// positive dt, trace backward;
+// negative dt, trace forward;
+inline __device__ float2 traceRK2(float* velTheta, float* velPhi, float& dt,
+				  float2& Id0, size_t pitch){
+
+    float2 vel0 = getVelocity(velPhi, velTheta, Id0, pitch);
+    float2 Id1 = Id0 - 0.5 * dt * vel0 * invGridLenGlobal;
+    float2 vel1 = getVelocity(velPhi, velTheta, Id1, pitch);
+    float2 Id2 = Id1 - dt * vel1 * invGridLenGlobal;
+
+    return Id2;
+}
+
+
+// Runge-Kutta 3rd Order Ralston
+// positive dt, trace backward;
+// negative dt, trace forward;
+inline __device__ float2 traceRK3(float* velTheta, float* velPhi, float& dt,
+				  float2& Id0, size_t pitch){
+    float c0 = 2.0 / 9.0 * dt * invGridLenGlobal,
+	c1 = 3.0 / 9.0 * dt * invGridLenGlobal,
+	c2 = 4.0 / 9.0 * dt * invGridLenGlobal;
+    float2 vel0 = getVelocity(velPhi, velTheta, Id0, pitch);
+    float2 Id1 = Id0 - 0.5 * dt * vel0 * invGridLenGlobal;
+    float2 vel1 = getVelocity(velPhi, velTheta, Id1, pitch);
+    float2 Id2 = Id1 - 0.75 * dt * vel1 * invGridLenGlobal;
+    float2 vel2 = getVelocity(velPhi, velTheta, Id2, pitch);
+
+    return Id0 - c0 * vel0 - c1 * vel1 - c2 * vel2;
 }
 
 
@@ -481,11 +526,11 @@ __global__ void advectionVPhiKernel
     fReal guPhi = velPhi[thetaId * pitch + phiId];
 
     fReal cofTheta = timeStepGlobal * invGridLenGlobal;
-// # ifdef sphere
-// fReal cofPhi = cofTheta / sinf(gTheta);
-// # else
+# ifdef sphere
+fReal cofPhi = cofTheta / sinf(gTheta);
+# else
     fReal cofPhi = cofTheta;
-// # endif
+# endif
     
     fReal deltaPhi = guPhi * cofPhi;
     fReal deltaTheta = guTheta * cofTheta;
@@ -539,11 +584,11 @@ __global__ void advectionVThetaKernel
     fReal guTheta = velTheta[thetaId * pitch + phiId];
     
     fReal cofTheta = timeStepGlobal * invGridLenGlobal;
-// # ifdef sphere
-//     fReal cofPhi = cofTheta / sinf(gTheta);
-// # else
+# ifdef sphere
+    fReal cofPhi = cofTheta / sinf(gTheta);
+# else
     fReal cofPhi = cofTheta;
-// # endif
+# endif
     
     fReal deltaPhi = guPhi * cofPhi;
     fReal deltaTheta = guTheta * cofTheta;
@@ -580,45 +625,19 @@ __global__ void advectionCentered
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
     // Coord in phi-theta space
-    fReal gPhiId = (fReal)phiId + centeredPhiOffset;
-    fReal gThetaId = (fReal)thetaId + centeredThetaOffset;
-    fReal gTheta = gThetaId * gridLenGlobal;
-    
-    // Sample the speed
-    // fReal guPhi = sampleVPhi(velPhi, gPhiId, gThetaId, nPitchInElements);
-    fReal guTheta = sampleVTheta(velTheta, gPhiId, gThetaId, nPitchInElements);
-    fReal guPhi = 0.5 * (velPhi[thetaId * nPitchInElements + phiId] +
-    			 velPhi[thetaId * nPitchInElements + (phiId + 1) % nPhiGlobal]);
+    float2 gId = make_float2((float)thetaId + centeredThetaOffset,
+			     (float)phiId + centeredPhiOffset);
 
-    fReal cofTheta = timeStepGlobal * invGridLenGlobal;
-# ifdef sphere
-    fReal cofPhi = cofTheta / sinf(gTheta);
+# ifdef RK3
+    float2 traceId = traceRK3(velTheta, velPhi, timeStepGlobal, gId, nPitchInElements);
 # else
-    fReal cofPhi = cofTheta;
-# endif
+    float2 traceId = traceRK2(velTheta, velPhi, timeStepGlobal, gId, nPitchInElements);
+# endif 
+    float advectedAttribute = sampleCentered(attributeInput, traceId.y, traceId.x, nPitchInElements);
 
-    fReal deltaPhi = guPhi * cofPhi;
-    fReal deltaTheta = guTheta * cofTheta;
-
-# ifdef RUNGE_KUTTA
-    // Traced halfway in phi-theta space
-    fReal midPhiId = gPhiId - 0.5 * deltaPhi;
-    fReal midThetaId = gThetaId - 0.5 * deltaTheta;
-    
-    fReal muPhi = sampleVPhi(velPhi, midPhiId, midThetaId, nPitchInElements);
-    fReal muTheta = sampleVTheta(velTheta, midPhiId, midThetaId, nPitchInElements);
-
-    deltaPhi = muPhi * cofPhi;
-    deltaTheta = muTheta * cofTheta;
-# endif
-
-    fReal pPhiId = gPhiId - deltaPhi;
-    fReal pThetaId = gThetaId - deltaTheta;
-
-    fReal advectedAttribute = sampleCentered(attributeInput, pPhiId, pThetaId, nPitchInElements);
-     
     attributeOutput[thetaId * nPitchInElements + phiId] = advectedAttribute;
 };
+
 
 
 __global__ void advectionAllCentered

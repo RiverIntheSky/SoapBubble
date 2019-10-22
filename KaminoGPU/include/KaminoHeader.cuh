@@ -67,6 +67,8 @@ enum Coord { phi, theta };
 # define WRITE_THICKNESS_DATA
 # define WRITE_CONCENTRATION_DATA
 # define RUNGE_KUTTA
+// # define RK2
+# define RK3
 # define PERFORMANCE_BENCHMARK
 # define TINYEXR_IMPLEMENTATION
 # define sphere
