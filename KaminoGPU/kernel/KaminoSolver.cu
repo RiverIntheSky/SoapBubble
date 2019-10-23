@@ -15,13 +15,13 @@ static __constant__ int Rows;
 static __constant__ int Ratio;
 
 
-__global__ void initParticleValues(fReal* particleVal, fReal* particleCoord, fReal* thickness, size_t pitch) {
-    int particleId = blockIdx.x * blockDim.x + threadIdx.x;
-    fReal phiId = particleCoord[2 * particleId];
-    fReal thetaId = particleCoord[2 * particleId + 1];
+// __global__ void initParticleValues(fReal* particleVal, fReal* particleCoord, fReal* thickness, size_t pitch) {
+//     int particleId = blockIdx.x * blockDim.x + threadIdx.x;
+//     fReal phiId = particleCoord[2 * particleId];
+//     fReal thetaId = particleCoord[2 * particleId + 1];
 
-    particleVal[particleId] = sampleCentered(thickness, phiId, thetaId, pitch);
-}
+//     particleVal[particleId] = sampleCentered(thickness, phiId, thetaId, pitch);
+// }
 
 
 __global__ void initMapping(float* map_theta, float* map_phi){
@@ -31,8 +31,8 @@ __global__ void initMapping(float* map_theta, float* map_phi){
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
 
-    map_theta[thetaId * nThetaGlobal + phiId] = (float)thetaId + centeredThetaOffset;
-    map_phi[thetaId * nThetaGlobal + phiId] = (float)phiId + centeredPhiOffset;
+    map_theta[thetaId * nPhiGlobal + phiId] = (float)thetaId + centeredThetaOffset;
+    map_phi[thetaId * nPhiGlobal + phiId] = (float)phiId + centeredPhiOffset;
 }
 
 
@@ -76,11 +76,11 @@ __global__ void initLinearSystem(int* row_ptr, int* col_ind) {
 }
 
 
-KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
-			   fReal H, int device, std::string AMGconfig) :
-    nPhi(nPhi), nTheta(nTheta), radius(radius), invRadius(1.0/radius), gridLen(M_2PI / nPhi), invGridLen(1.0 / gridLen), frameDuration(frameDuration),
-    timeStep(0.0), timeElapsed(0.0), advectionTime(0.0), bodyforceTime(0.0), CGTime(0.0),
-    H(H), epsilon(H/radius), N(nPhi*nTheta), nz(5*N)
+KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
+			   float H, int device, std::string AMGconfig) :
+    nPhi(nPhi), nTheta(nTheta), radius(radius), invRadius(1.0/radius), gridLen(M_2PI / nPhi),
+    invGridLen(1.0 / gridLen), timeStep(dt), timeElapsed(0.0), advectionTime(0.0),
+    bodyforceTime(0.0), CGTime(0.0), H(H), epsilon(H/radius), N(nPhi*nTheta), nz(5*N)
 {
     /// FIXME: Should we detect and use device 0?
     /// Replace it later with functions from helper_cuda.h!
@@ -114,10 +114,10 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
 					 centeredPhiOffset, centeredThetaOffset);
     this->surfConcentration = new KaminoQuantity("gamma", nPhi, nTheta,
 						 centeredPhiOffset, centeredThetaOffset);
-			   				   
+    this->pitch = surfConcentration->getThisStepPitchInElements();
 
     initWithConst(this->velPhi, 0.0);
-    // initialize_velocity();
+    initialize_velocity();
     initWithConst(this->velTheta, 0.0);
     initWithConst(this->thickness, 1.0);
     initWithConst(this->surfConcentration, 1.0);
@@ -282,9 +282,9 @@ KaminoSolver::~KaminoSolver()
     CHECK_CUDA(cudaFree(tmp_p));
     CHECK_CUDA(cudaFree(tmp_t));
     
-# ifdef WRITE_PARTICLES
-    delete this->particles;
-# endif
+// # ifdef WRITE_PARTICLES
+//     delete this->particles;
+// # endif
 
     checkCudaErrors(cudaDeviceReset());
 
@@ -295,6 +295,7 @@ KaminoSolver::~KaminoSolver()
     std::cout << "Percentage of advection : " << advectionTime / totalTimeUsed * 100.0f << "%" << std::endl;
     std::cout << "Percentage of bodyforce : " << bodyforceTime / totalTimeUsed * 100.0f << "%" << std::endl;
     std::cout << "Percentage of CG / bodyforce : " << CGTime / bodyforceTime * 100.0f << "%" << std::endl;
+    std::cout << "Elapsed time" << this->timeElapsed << std::endl;
 # endif
 }
 
@@ -434,15 +435,15 @@ void KaminoSolver::adjustStepSize(fReal& dt, const fReal& U, const fReal& epsilo
 }
 
 
-void KaminoSolver::stepForward(fReal timeStep) {
-    advection(timeStep);
-    bodyforce();
+void KaminoSolver::stepForward(float dt) {
+    float dt_ = this->timeStep;
+    this->timeStep = dt;
+    stepForward();
+    this->timeStep = dt_;
 }
 
 
 void KaminoSolver::stepForward() {
-    this->timeStep = timeStep;
-    
 # ifdef PERFORMANCE_BENCHMARK
     KaminoTimer timer;
     timer.startTimer();
@@ -450,14 +451,14 @@ void KaminoSolver::stepForward() {
     updateCFL();
 
     updateForward(this->timeStep, forward_t, forward_p);
-    // updateBackward(this->timeStep, backward_t, backward_p);
+    updateBackward(this->timeStep, backward_t, backward_p);
 
     advection();
 # ifdef PERFORMANCE_BENCHMARK
     this->advectionTime += timer.stopTimer() * 0.001f;
     timer.startTimer();
 # endif
-    bodyforce();
+    // bodyforce();
 # ifdef PERFORMANCE_BENCHMARK
     this->bodyforceTime += timer.stopTimer() * 0.001f;
 # endif
@@ -535,25 +536,25 @@ void KaminoSolver::initThicknessfromPic(std::string path, size_t particleDensity
    	}
     }    
 
-    this->particles = new KaminoParticles(path, particleDensity, gridLen, nTheta);
+    // this->particles = new KaminoParticles(path, particleDensity, gridLen, nTheta);
 
-    if (particleDensity > 0) {
-	dim3 gridLayout;
-	dim3 blockLayout;
-	determineLayout(gridLayout, blockLayout, 1, this->particles->numOfParticles);
-	initParticleValues<<<gridLayout, blockLayout>>>
-	    (this->particles->value, this->particles->coordGPUThisStep, this->thickness->getGPUThisStep(),
-	     this->thickness->getThisStepPitchInElements());
-	checkCudaErrors(cudaGetLastError());
-	checkCudaErrors(cudaDeviceSynchronize());	
-    }
+    // if (particleDensity > 0) {
+    // 	dim3 gridLayout;
+    // 	dim3 blockLayout;
+    // 	determineLayout(gridLayout, blockLayout, 1, this->particles->numOfParticles);
+    // 	initParticleValues<<<gridLayout, blockLayout>>>
+    // 	    (this->particles->value, this->particles->coordGPUThisStep, this->thickness->getGPUThisStep(),
+    // 	     this->thickness->getThisStepPitchInElements());
+    // 	checkCudaErrors(cudaGetLastError());
+    // 	checkCudaErrors(cudaDeviceSynchronize());	
+    // }
 }
 
 
-void KaminoSolver::initParticlesfromPic(std::string path, size_t parPerGrid)
-{
-    this->particles = new KaminoParticles(path, parPerGrid, gridLen, nTheta);
-}
+// void KaminoSolver::initParticlesfromPic(std::string path, size_t parPerGrid)
+// {
+//     this->particles = new KaminoParticles(path, parPerGrid, gridLen, nTheta);
+// }
 
 
 void KaminoSolver::write_image(const std::string& s, size_t width, size_t height, std::vector<float> *images) {
@@ -746,86 +747,86 @@ void KaminoSolver::write_concentration_image(const std::string& s, const int fra
 } 
 
 
-__global__ void upsampleParticles
-(fReal* particleCoord, fReal* particleVal, float2* weight, size_t numParticles)
-{
-    // Index
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int particleId = index >> 1; // (index / 2)
-    int partition = index & 1;	 // (index % 2)
+// __global__ void upsampleParticles
+// (fReal* particleCoord, fReal* particleVal, float2* weight, size_t numParticles)
+// {
+//     // Index
+//     int index = blockIdx.x * blockDim.x + threadIdx.x;
+//     int particleId = index >> 1; // (index / 2)
+//     int partition = index & 1;	 // (index % 2)
 
-    if (particleId < numParticles) {
-	fReal gridLen = M_PI / Rows;
-	fReal gPhiId = particleCoord[2 * particleId] * Ratio;
-	fReal gThetaId = particleCoord[2 * particleId + 1] * Ratio;
+//     if (particleId < numParticles) {
+// 	fReal gridLen = M_PI / Rows;
+// 	fReal gPhiId = particleCoord[2 * particleId] * Ratio;
+// 	fReal gThetaId = particleCoord[2 * particleId + 1] * Ratio;
 
-	fReal gTheta = gThetaId * gridLen;
-	fReal gPhi = gPhiId * gridLen;
+// 	fReal gTheta = gThetaId * gridLen;
+// 	fReal gPhi = gPhiId * gridLen;
 
-	fReal sinTheta = sinf(gTheta);
-	if (sinTheta < 1e-7f)
-	    return;
+// 	fReal sinTheta = sinf(gTheta);
+// 	if (sinTheta < 1e-7f)
+// 	    return;
 
-	size_t thetaId = static_cast<size_t>(floorf(gThetaId));
+// 	size_t thetaId = static_cast<size_t>(floorf(gThetaId));
 
-	fReal x1 = cosf(gPhi) * sinTheta; fReal y1 = sinf(gPhi) * sinTheta; fReal z1 = cosf(gTheta);
+// 	fReal x1 = cosf(gPhi) * sinTheta; fReal y1 = sinf(gPhi) * sinTheta; fReal z1 = cosf(gTheta);
 
-	fReal theta = (thetaId + 0.5) * gridLen;
+// 	fReal theta = (thetaId + 0.5) * gridLen;
 
-	fReal phiRange = 0.5/sinTheta;
-	int minPhiId = static_cast<int>(ceilf(gPhiId - phiRange));
-	int maxPhiId = static_cast<int>(floorf(gPhiId + phiRange));
+// 	fReal phiRange = 0.5/sinTheta;
+// 	int minPhiId = static_cast<int>(ceilf(gPhiId - phiRange));
+// 	int maxPhiId = static_cast<int>(floorf(gPhiId + phiRange));
 
-	fReal z2 = cosf(theta);
-	fReal r = sinf(theta);
-	fReal value = particleVal[particleId];
+// 	fReal z2 = cosf(theta);
+// 	fReal r = sinf(theta);
+// 	fReal value = particleVal[particleId];
 
-	int begin; int end;
+// 	int begin; int end;
 	
-	if (partition == 0) {
-	    begin = minPhiId; end = static_cast<int>(gPhiId);
-	} else {
-	    begin = static_cast<int>(gPhiId); end = maxPhiId + 1;
-	}
+// 	if (partition == 0) {
+// 	    begin = minPhiId; end = static_cast<int>(gPhiId);
+// 	} else {
+// 	    begin = static_cast<int>(gPhiId); end = maxPhiId + 1;
+// 	}
 	    
-	for (int phiId = begin; phiId < end; phiId++) {
-	    fReal phi = phiId * gridLen;
-	    fReal x2 = cosf(phi) * r; fReal y2 = sinf(phi) * r;
+// 	for (int phiId = begin; phiId < end; phiId++) {
+// 	    fReal phi = phiId * gridLen;
+// 	    fReal x2 = cosf(phi) * r; fReal y2 = sinf(phi) * r;
 
-	    fReal dist2 = powf(fabsf(x1 - x2), 2.f) + powf(fabsf(y1 - y2), 2.f) + powf(fabsf(z1 - z2), 2.f);
+// 	    fReal dist2 = powf(fabsf(x1 - x2), 2.f) + powf(fabsf(y1 - y2), 2.f) + powf(fabsf(z1 - z2), 2.f);
 	        
-	    if (dist2 <= .25f) {
-		fReal w = expf(-10*dist2);
-		size_t normalizedPhiId = (phiId + Cols) % Cols;
-		float2* currentWeight = weight + (thetaId * Cols + normalizedPhiId);
-		atomicAdd(&(currentWeight->x), w);
-		atomicAdd(&(currentWeight->y), w * value);
-	    }
-	}
-    }
-}
+// 	    if (dist2 <= .25f) {
+// 		fReal w = expf(-10*dist2);
+// 		size_t normalizedPhiId = (phiId + Cols) % Cols;
+// 		float2* currentWeight = weight + (thetaId * Cols + normalizedPhiId);
+// 		atomicAdd(&(currentWeight->x), w);
+// 		atomicAdd(&(currentWeight->y), w * value);
+// 	    }
+// 	}
+//     }
+// }
 
 
-__global__ void normalizeThickness
-(fReal* thicknessHighRes, fReal* thicknessLowRes, float2* weight, size_t pitch) {
-    // Index
-    int splitVal = Cols / blockDim.x;
-    int threadSequence = blockIdx.x % splitVal;
-    int phiId = threadIdx.x + threadSequence * blockDim.x;
-    int thetaId = blockIdx.x / splitVal;
+// __global__ void normalizeThickness
+// (fReal* thicknessHighRes, fReal* thicknessLowRes, float2* weight, size_t pitch) {
+//     // Index
+//     int splitVal = Cols / blockDim.x;
+//     int threadSequence = blockIdx.x % splitVal;
+//     int phiId = threadIdx.x + threadSequence * blockDim.x;
+//     int thetaId = blockIdx.x / splitVal;
 
-    float2* currentWeight = weight + (thetaId * Cols + phiId);
-    fReal w = currentWeight->x;
-    fReal val = currentWeight->y;
+//     float2* currentWeight = weight + (thetaId * Cols + phiId);
+//     fReal w = currentWeight->x;
+//     fReal val = currentWeight->y;
 
-    thicknessHighRes[thetaId * Cols + phiId] = 0.f;
-    __syncthreads();
+//     thicknessHighRes[thetaId * Cols + phiId] = 0.f;
+//     __syncthreads();
 
-    if (w > 0) {
-    	thicknessHighRes[thetaId * Cols + phiId] = val / w;
-    } 
-    __syncthreads();
-    if (w == 0) {
+//     if (w > 0) {
+//     	thicknessHighRes[thetaId * Cols + phiId] = val / w;
+//     } 
+//     __syncthreads();
+//     if (w == 0) {
     	// int neighbors[4];
     	// if (thetaId == 0) {
     	//     neighbors[0] = thetaId * Cols + (phiId + Cols / 2) % Cols;
@@ -851,12 +852,12 @@ __global__ void normalizeThickness
     	// if (nonZero == 4) {
     	//     thicknessHighRes[thetaId * Cols + phiId] = valn / nonZero;
 	// } else {
-	    fReal gPhiId = ((fReal)phiId + centeredPhiOffset) / Ratio;
-	    fReal gThetaId = ((fReal)thetaId + centeredThetaOffset) / Ratio;
-	    thicknessHighRes[thetaId * Cols + phiId] = sampleCentered(thicknessLowRes, gPhiId, gThetaId, pitch);
+	    // fReal gPhiId = ((fReal)phiId + centeredPhiOffset) / Ratio;
+	    // fReal gThetaId = ((fReal)thetaId + centeredThetaOffset) / Ratio;
+	    // thicknessHighRes[thetaId * Cols + phiId] = sampleCentered(thicknessLowRes, gPhiId, gThetaId, pitch);
 	// }
-    }
-}
+//     }
+// }
 
 
 void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
@@ -873,52 +874,53 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
     std::ofstream of(mat_string);
 
     //    if (frame != 0) {
-    if (false) {
-	dim3 gridLayout;
-	dim3 blockLayout;
-	determineLayout(gridLayout, blockLayout, rows, cols);
-	resetThickness<<<gridLayout, blockLayout>>>(weightFull);
-	checkCudaErrors(cudaGetLastError());
-	checkCudaErrors(cudaDeviceSynchronize());
+    // if (false) {
+    // 	dim3 gridLayout;
+    // 	dim3 blockLayout;
+    // 	determineLayout(gridLayout, blockLayout, rows, cols);
+    // 	resetThickness<<<gridLayout, blockLayout>>>(weightFull);
+    // 	checkCudaErrors(cudaGetLastError());
+    // 	checkCudaErrors(cudaDeviceSynchronize());
 	
-        if (particles->numOfParticles > 0) {
-	    determineLayout(gridLayout, blockLayout, 2, particles->numOfParticles);
-	    upsampleParticles<<<gridLayout, blockLayout>>>
-		(particles->coordGPUThisStep, particles->value, weightFull, particles->numOfParticles);
-	    checkCudaErrors(cudaGetLastError());
-	    checkCudaErrors(cudaDeviceSynchronize());
-	}
+    //     if (particles->numOfParticles > 0) {
+    // 	    determineLayout(gridLayout, blockLayout, 2, particles->numOfParticles);
+    // 	    upsampleParticles<<<gridLayout, blockLayout>>>
+    // 		(particles->coordGPUThisStep, particles->value, weightFull, particles->numOfParticles);
+    // 	    checkCudaErrors(cudaGetLastError());
+    // 	    checkCudaErrors(cudaDeviceSynchronize());
+    // 	}
 	
-	determineLayout(gridLayout, blockLayout, rows, cols);
-	normalizeThickness<<<gridLayout, blockLayout>>>
-	    (thicknessFull, thickness->getGPUThisStep(), weightFull, thickness->getThisStepPitchInElements());
-	checkCudaErrors(cudaGetLastError());
-	checkCudaErrors(cudaDeviceSynchronize());
-	cudaMemcpy(thicknessFullCPU, thicknessFull, (cols * rows) * sizeof(fReal), cudaMemcpyDeviceToHost);
+    // 	determineLayout(gridLayout, blockLayout, rows, cols);
+    // 	normalizeThickness<<<gridLayout, blockLayout>>>
+    // 	    (thicknessFull, thickness->getGPUThisStep(), weightFull, thickness->getThisStepPitchInElements());
+    // 	checkCudaErrors(cudaGetLastError());
+    // 	checkCudaErrors(cudaDeviceSynchronize());
+    // 	cudaMemcpy(thicknessFullCPU, thicknessFull, (cols * rows) * sizeof(fReal), cudaMemcpyDeviceToHost);
 
-	std::vector<float> images[3];
-	images[0].resize(cols * rows);
-	images[1].resize(cols * rows);
-	images[2].resize(cols * rows);
+    // 	std::vector<float> images[3];
+    // 	images[0].resize(cols * rows);
+    // 	images[1].resize(cols * rows);
+    // 	images[2].resize(cols * rows);
 
-	for (size_t j = 0; j < rows; ++j) {
-	    for (size_t i = 0; i < cols; ++i) {
-		fReal Delta = thicknessFullCPU[j * cols + i];
-		if (Delta < 0) { 
-		    this->setBroken(true);
-		    return;
-		} else {
-		    images[0][j * cols + i] = Delta * this->H * 5e5;
-		    images[1][j * cols + i] = Delta * this->H * 5e5;
-		    images[2][j * cols + i] = Delta * this->H * 5e5; // *4
-		    of << Delta * this->H * 2<< " ";
-		}
-	    }
-	    of << std::endl;
-	}
+    // 	for (size_t j = 0; j < rows; ++j) {
+    // 	    for (size_t i = 0; i < cols; ++i) {
+    // 		fReal Delta = thicknessFullCPU[j * cols + i];
+    // 		if (Delta < 0) { 
+    // 		    this->setBroken(true);
+    // 		    return;
+    // 		} else {
+    // 		    images[0][j * cols + i] = Delta * this->H * 5e5;
+    // 		    images[1][j * cols + i] = Delta * this->H * 5e5;
+    // 		    images[2][j * cols + i] = Delta * this->H * 5e5; // *4
+    // 		    of << Delta * this->H * 2<< " ";
+    // 		}
+    // 	    }
+    // 	    of << std::endl;
+    // 	}
 
-	write_image(img_string, cols, rows, images);
-    } else {
+    // 	write_image(img_string, cols, rows, images);
+    // } else 
+    {
 	thickness->copyBackToCPU();
 
 	std::vector<float> images[3];

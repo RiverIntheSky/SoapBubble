@@ -37,6 +37,10 @@
 # define vThetaPhiOffset 0.0
 # define vThetaThetaOffset 1.0
 
+# define centeredOffset make_float2(0.5f, 0.f) // (theta, phi)
+# define vPhiOffset make_float2(0.5f, -0.5f)
+# define vThetaOffset make_float2(1.f, 0.f)
+
 //# define getIndex(phi, theta) (theta * this->nPhi + phi)
 
 # define DEBUGBUILD
@@ -65,14 +69,14 @@ enum Coord { phi, theta };
 # define WRITE_VELOCITY_DATA
 // # define WRITE_PARTICLES
 # define WRITE_THICKNESS_DATA
-# define WRITE_CONCENTRATION_DATA
+// # define WRITE_CONCENTRATION_DATA
 # define RUNGE_KUTTA
 // # define RK2
 # define RK3
 # define PERFORMANCE_BENCHMARK
 # define TINYEXR_IMPLEMENTATION
 # define sphere
-# define gravity
+// # define gravity
 // # define uair
 // # define vair
  

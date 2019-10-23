@@ -5,11 +5,10 @@
 # include "../include/KaminoQuantity.cuh"
 # include "../include/KaminoParticles.cuh"
 
-extern __constant__ fReal invGridLenGlobal;
+extern __constant__ float invGridLenGlobal;
 
-__device__ bool validateCoord(fReal& phi, fReal& theta, size_t& nPhi);
-__device__ fReal kaminoLerp(fReal from, fReal to, fReal alpha);
-__device__ fReal sampleCentered(fReal* input, fReal phiRawId, fReal thetaRawId, size_t pitch);
+__device__ float kaminoLerp(float from, float to, float alpha);
+// __device__ float sampleCentered(float* input, float phiRawId, float thetaRawId, size_t pitch);
 __global__ void resetThickness(float2* weight);
 __global__ void initLinearSystem(int* row_ptr, int* col_ind);
 
@@ -24,35 +23,35 @@ private:
     // Buffer for U, the fouriered coefs
     // This pointer's for the pooled global memory (nTheta by nPhi)
     ComplexFourier* gpuUFourier;
-    fReal* gpuUReal;
-    fReal* gpuUImag;
+    float* gpuUReal;
+    float* gpuUImag;
 
     // Buffer for V, the fouriered coefs
     // This pointer's for the pooled global memory as well
     ComplexFourier* gpuFFourier;
-    fReal* gpuFReal;
-    fReal* gpuFImag;
-    fReal* gpuFZeroComponent;
+    float* gpuFReal;
+    float* gpuFImag;
+    float* gpuFZeroComponent;
     
     // Buffer for elements that can be preallocated
-    fReal* div;
+    float* div;
     float2* weight;
 
     // original resolution
     float2* weightFull;
-    fReal* thicknessFull;
-    fReal* thicknessFullCPU;
+    float* thicknessFull;
+    float* thicknessFullCPU;
     int cols;
     int rows;
 
     /// Precompute these!
     // nPhi by nTheta elements, but they should be retrieved by shared memories
     // in the TDM kernel we solve nTheta times with each time nPhi elements.
-    fReal* gpuA;
+    float* gpuA;
     // Diagonal elements b (major diagonal);
-    fReal* gpuB;
+    float* gpuB;
     // Diagonal elements c (upper);
-    fReal* gpuC;
+    float* gpuC;
     void precomputeABCCoef();
 
     /* Grid dimensions */
@@ -61,13 +60,13 @@ private:
     /* Cuda dimensions */
     size_t nThreadxMax;
     /* Radius of sphere */
-    fReal radius;
+    float radius;
     /* Inverted radius of sphere */
-    fReal invRadius;
+    float invRadius;
     /* Grid size */
-    fReal gridLen;
+    float gridLen;
     /* Inverted grid size*/
-    fReal invGridLen;
+    float invGridLen;
     /* Whether film is broken */
     bool broken = false;
 
@@ -75,7 +74,7 @@ private:
     //    int B, C, D, E;
 
     /* average film thickness */
-    fReal H;
+    float H;
     /* expansion parameter */
     float epsilon;
 
@@ -99,26 +98,22 @@ private:
 
     cusparseSpMatDescr_t matM; /* pre-conditioner */
 
-    /* So that it remembers all these attributes within */
-    //std::map<std::string, KaminoQuantity*> centeredAttr;
-    //std::map<std::string, KaminoQuantity*> staggeredAttr;
-
     KaminoQuantity* velTheta;
-    KaminoQuantity* velPhi;
+    KaminoQuantity* velPhi; // u_phi/(sin(theta)) is stored instead of u_phi
     KaminoQuantity* thickness;
     KaminoQuantity* bulkConcentration;
     KaminoQuantity* surfConcentration;
     KaminoQuantity* pressure;
     KaminoQuantity* density;
+    size_t pitch; // all the quantities have the same padding
     void copyVelocity2GPU();
     void copyVelocityBack2CPU();
     void copyDensity2GPU();
     void copyDensityBack2CPU();
 
     /* Something about time steps */
-    fReal frameDuration;
-    fReal timeStep;
-    fReal timeElapsed;
+    float timeStep;
+    float timeElapsed;
 
     float advectionTime;
     float bodyforceTime;
@@ -150,7 +145,6 @@ private:
     void updateCFL();
 
     /// Kernel calling from here
-    void advection(fReal& timeStep);
     void advection();
     void bodyforce();
     void conjugateGradient();
@@ -163,27 +157,27 @@ private:
     void initialize_velocity();
 	
     /* FBM noise function for velocity distribution */
-    fReal FBM(const fReal x, const fReal y);
+    float FBM(const float x, const float y);
     /* 2D noise interpolation function for smooth FBM noise */
-    fReal interpNoise2D(const fReal x, const fReal y) const;
+    float interpNoise2D(const float x, const float y) const;
     /* returns a pseudorandom number between -1 and 1 */
-    fReal rand(const vec2 vecA) const;
+    float rand(const vec2 vecA) const;
     /* determine the layout of the grids and blocks */
     void determineLayout(dim3& gridLayout, dim3& blockLayout,
 			 size_t nRow_theta, size_t nCol_phi);
 public:
-    KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
-		 fReal H, int device, std::string AMGconfig);
+    KaminoSolver(size_t nPhi, size_t nTheta, float radius, float frameDuration,
+		 float H, int device, std::string AMGconfig);
     ~KaminoSolver();
 
-    void initWithConst(KaminoQuantity* attrib, fReal val);
+    void initWithConst(KaminoQuantity* attrib, float val);
     void initThicknessfromPic(std::string path, size_t particleDensity);
     void initParticlesfromPic(std::string path, size_t parPergrid);
 
-    void copyToCPU(KaminoQuantity* quantity, fReal* cpubuffer);
-    fReal maxAbsDifference(const fReal* A, const fReal* B, const size_t& size);
-    void adjustStepSize(fReal& timeStep, const fReal& U, const fReal& eps);
-    void stepForward(fReal timeStep);
+    void copyToCPU(KaminoQuantity* quantity, float* cpubuffer);
+    float maxAbsDifference(const float* A, const float* B, const size_t& size);
+    void adjustStepSize(float& timeStep, const float& U, const float& eps);
+    void stepForward(float timeStep);
     void stepForward();
     bool isBroken();
     void setBroken(bool broken);
@@ -201,8 +195,8 @@ public:
 			       size_t pitch);
 
     /* Bimocq */
-    void updateForward(float dt, float* fwd_t, float* fwd_p);
-    void updateBackward(float dt, float* bwd_t, float* bwd_p);
+    void updateForward(float dt, float* &fwd_t, float* &fwd_p);
+    void updateBackward(float dt, float* &bwd_t, float* &bwd_p);
 
     KaminoParticles* particles;
 };
