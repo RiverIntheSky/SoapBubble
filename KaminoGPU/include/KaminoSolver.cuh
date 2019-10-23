@@ -124,7 +124,12 @@ private:
     float bodyforceTime;
     float CGTime;
 
-    // AMGX
+    /* CFL */
+    float cfldt;
+    float maxu;
+    float maxv;
+
+    /* AMGX */
     AMGX_Mode mode;
     AMGX_config_handle cfg;
     AMGX_resources_handle res;
@@ -133,6 +138,16 @@ private:
     AMGX_solver_handle solver;
     //status handling
     AMGX_SOLVE_STATUS status;
+
+    /* Bimocq mapping buffers */
+    float *forward_p, *forward_t,
+	*backward_p, *backward_t,
+	*forward_scalar_t, *forward_scalar_p,
+	*backward_scalar_p, *backward_scalar_t,
+	*backward_pprev, *backward_tprev,
+	*backward_scalar_pprev, *backward_scalar_tprev,
+	*tmp_p, *tmp_t;
+    void updateCFL();
 
     /// Kernel calling from here
     void advection(fReal& timeStep);
@@ -184,6 +199,10 @@ public:
     template <typename T>
     void printGPUarraytoMATLAB(std::string filename, T* vec, int num_row, int num_col,
 			       size_t pitch);
+
+    /* Bimocq */
+    void updateForward(float dt, float* fwd_t, float* fwd_p);
+    void updateBackward(float dt, float* bwd_t, float* bwd_p);
 
     KaminoParticles* particles;
 };

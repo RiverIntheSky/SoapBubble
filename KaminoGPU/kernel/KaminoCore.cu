@@ -20,7 +20,31 @@ static __constant__ float CrGlobal;
 static __constant__ float UGlobal;
 
 
-#define eps 1e-5f
+# define eps 1e-5f
+# define MAX_BLOCK_SIZE 1024
+
+__global__ void maxVelKernel(float* maxVel, float* vel){
+    __shared__ float maxVelTile[MAX_BLOCK_SIZE];
+	
+    int tid = threadIdx.x;
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+    maxVelTile[tid] = fabsf(vel[i]);
+    __syncthreads();   
+    //sequential addressing by reverse loop and thread-id based indexing
+    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+	if (tid < s) {
+	    if (maxVelTile[tid + s] > maxVelTile[tid])
+		maxVelTile[tid] = maxVelTile[tid + s];
+	}
+	__syncthreads();
+    }
+    
+    if (tid == 0) {
+	maxVel[blockIdx.x] = maxVelTile[0];
+    }
+}
+
 
 __device__ bool validateCoord(fReal& phi, fReal& theta, size_t& nPhi) {
     bool ret = false;
@@ -289,6 +313,21 @@ inline __device__ float2 traceRK3(float* velTheta, float* velPhi, float& dt,
     return Id0 - c0 * vel0 - c1 * vel1 - c2 * vel2;
 }
 
+
+__global__ void	updateBackwardKernel(float dt, float* bwd_t, float* bwd_p,
+				     float* tmp_t, float* tmp_p){
+    // Index
+    int splitVal = nPhiGlobal / blockDim.x;
+    int threadSequence = blockIdx.x % splitVal;
+    int phiId = threadIdx.x + threadSequence * blockDim.x;
+    int thetaId = blockIdx.x / splitVal;
+
+    float2 pos = make_float2((float)thetaId + centeredThetaOffset,
+			 (float)phiId + centeredPhiOffset);
+    float2 back_pos = DMC(dt, pos);
+    tmp_p[thetaId * nThetaGlobal + phiId] = sampleCentered(bwd_p, back_pos.y, back_pos.x, nPhiGlobal);
+    tmp_t[thetaId * nThetaGlobal + phiId] = sampleCentered(bwd_t, back_pos.y, back_pos.x, nPhiGlobal);
+}
 
 __global__ void advectionVSpherePhiKernel
 (float* velPhiOutput, float* velPhiInput, float* velThetaInput, size_t pitch)
@@ -877,6 +916,60 @@ __global__ void advectionCentered
 void KaminoSolver::advection(fReal& dt) {
     checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &dt, sizeof(fReal)));
     advection();
+}
+
+
+// void KaminoSolver::updateForward(float dt, float* fwd_t, float* fwd_p) {
+//     dim3 gridLayout;
+//     dim3 blockLayout;
+//     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+//     updateForwardKernel<<<gridLayout, blockLayout>>>(dt, fwd_t, fwd_p);
+// }
+
+void KaminoSolver::updateBackward(float dt, float* bwd_t, float* bwd_p) {
+    float T = 0.0;
+    float substep = std::min(cfldt, dt); // cfl < 1 required
+    
+    dim3 gridLayout;
+    dim3 blockLayout;
+    determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+    while (T < dt) {
+	if (T + substep > dt) substep = dt -T;
+	updateBackwardKernel<<<gridLayout, blockLayout>>>
+	    (substep, bwd_t, bwd_p, tmp_t, tmp_p);
+	T += substep;
+	CHECK_CUDA(cudaGetLastError());
+	CHECK_CUDA(cudaDeviceSynchronize());
+	std::swap(bwd_t, tmp_t);
+	std::swap(bwd_p, tmp_t);
+    }
+}
+
+
+void KaminoSolver::updateCFL(){
+    float *maxVel;
+    CHECK_CUDA(cudaMalloc(&maxVel, MAX_BLOCK_SIZE * sizeof(float)));
+
+    dim3 gridLayout;
+    dim3 blockLayout;
+    determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getThisStepPitchInElements());
+    maxVelKernel<<<gridLayout, blockLayout>>>(maxVel, velTheta->getGPUThisStep());
+    CHECK_CUDA(cudaDeviceSynchronize());
+    maxVelKernel<<<1, blockLayout>>>(maxVel, maxVel);
+    CHECK_CUDA(cudaMemcpy(&(this->maxv), maxVel, sizeof(float),
+     			  cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemset(maxVel, 0, MAX_BLOCK_SIZE * sizeof(float)));
+
+    determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getThisStepPitchInElements());
+    maxVelKernel<<<gridLayout, blockLayout>>>(maxVel, velPhi->getGPUThisStep());
+    CHECK_CUDA(cudaDeviceSynchronize());
+    maxVelKernel<<<1, blockLayout>>>(maxVel, maxVel);
+    CHECK_CUDA(cudaMemcpy(&(this->maxu), maxVel, sizeof(float),
+     			  cudaMemcpyDeviceToHost));    
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaFree(maxVel));
+
+    this->cfldt = gridLen / std::max(std::max(maxu, maxv), eps);
 }
 
 

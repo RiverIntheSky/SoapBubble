@@ -24,6 +24,18 @@ __global__ void initParticleValues(fReal* particleVal, fReal* particleCoord, fRe
 }
 
 
+__global__ void initMapping(float* map_theta, float* map_phi){
+    // Index
+    int splitVal = nPhiGlobal / blockDim.x;
+    int threadSequence = blockIdx.x % splitVal;
+    int phiId = threadIdx.x + threadSequence * blockDim.x;
+    int thetaId = blockIdx.x / splitVal;
+
+    map_theta[thetaId * nThetaGlobal + phiId] = (float)thetaId + centeredThetaOffset;
+    map_phi[thetaId * nThetaGlobal + phiId] = (float)phiId + centeredPhiOffset;
+}
+
+
 __global__ void initLinearSystem(int* row_ptr, int* col_ind) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -118,18 +130,18 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
     
-    printGPUarraytoMATLAB<int>("test/row_ptr.txt", row_ptr, N + 1, 1, 1);
-    printGPUarraytoMATLAB<int>("test/col_ind.txt", col_ind, N, 5, 5);
+    // printGPUarraytoMATLAB<int>("test/row_ptr.txt", row_ptr, N + 1, 1, 1);
+    // printGPUarraytoMATLAB<int>("test/col_ind.txt", col_ind, N, 5, 5);
     
     // cuSPARSE and cuBLAS
     CHECK_CUBLAS(cublasCreate(&cublasHandle));
     CHECK_CUSPARSE(cusparseCreate(&cusparseHandle));
 
     // Device memory management
-    CHECK_CUDA(cudaMalloc((void**)&d_x, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&d_r, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&d_p, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc((void**)&d_omega, N * sizeof(float)));   
+    CHECK_CUDA(cudaMalloc(&d_x, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_r, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_p, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_omega, N * sizeof(float)));   
 	
     // Create preconditioner and dense vectors
     // CHECK_CUSPARSE(cusparseCreateCsr(&matM, N, N, N, row_ptrm, col_indm,
@@ -168,13 +180,57 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frame
     AMGX_vector_create(&b, res, mode);
     AMGX_vector_create(&x, res, mode);
     AMGX_solver_create(&solver, res, mode, cfg);
+
+    /* Bimocq mapping buffers */
+    CHECK_CUDA(cudaMalloc(&forward_p, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&forward_t, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&backward_p, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&backward_t, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&forward_scalar_p, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&forward_scalar_t, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&backward_scalar_p, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&backward_scalar_t, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&backward_pprev, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&backward_tprev, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&backward_scalar_pprev, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&backward_scalar_tprev, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&backward_scalar_pprev, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&backward_scalar_tprev, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&tmp_p, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&tmp_t, N * sizeof(float)));
+    
+    determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+    initMapping<<<gridLayout, blockLayout>>>(forward_t, forward_p);
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    CHECK_CUDA(cudaMemcpy(backward_p, forward_p, N * sizeof(float),
+			  cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(forward_scalar_p, forward_p, N * sizeof(float),
+			  cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(backward_scalar_p, forward_p, N * sizeof(float),
+			  cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(backward_pprev, forward_p, N * sizeof(float),
+			  cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(backward_scalar_pprev, forward_p, N * sizeof(float),
+			  cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(backward_t, forward_t, N * sizeof(float),
+			  cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(forward_scalar_t, forward_t, N * sizeof(float),
+			  cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(backward_scalar_t, forward_t, N * sizeof(float),
+			  cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(backward_tprev, forward_t, N * sizeof(float),
+			  cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(backward_scalar_tprev, forward_t, N * sizeof(float),
+			  cudaMemcpyDeviceToDevice));
 }
 
 
 KaminoSolver::~KaminoSolver()
 {
-    checkCudaErrors(cudaFree(div));
-    checkCudaErrors(cudaFree(weight));
+    CHECK_CUDA(cudaFree(div));
+    CHECK_CUDA(cudaFree(weight));
     CHECK_CUDA(cudaFree(row_ptr));
     CHECK_CUDA(cudaFree(col_ind));
     CHECK_CUDA(cudaFree(rhs));
@@ -210,6 +266,22 @@ KaminoSolver::~KaminoSolver()
     AMGX_finalize_plugins();
     AMGX_finalize();
 
+    /* Bimocq mapping buffers */
+    CHECK_CUDA(cudaFree(forward_p));
+    CHECK_CUDA(cudaFree(forward_t));
+    CHECK_CUDA(cudaFree(backward_p));
+    CHECK_CUDA(cudaFree(backward_t));
+    CHECK_CUDA(cudaFree(forward_scalar_p));
+    CHECK_CUDA(cudaFree(forward_scalar_t));
+    CHECK_CUDA(cudaFree(backward_scalar_p));
+    CHECK_CUDA(cudaFree(backward_scalar_t));
+    CHECK_CUDA(cudaFree(backward_pprev));
+    CHECK_CUDA(cudaFree(backward_tprev));
+    CHECK_CUDA(cudaFree(backward_scalar_pprev));
+    CHECK_CUDA(cudaFree(backward_scalar_tprev));
+    CHECK_CUDA(cudaFree(tmp_p));
+    CHECK_CUDA(cudaFree(tmp_t));
+    
 # ifdef WRITE_PARTICLES
     delete this->particles;
 # endif
@@ -375,6 +447,10 @@ void KaminoSolver::stepForward() {
     KaminoTimer timer;
     timer.startTimer();
 # endif
+    updateCFL();
+
+    updateForward(this->timeStep, forward_t, forward_p);
+    // updateBackward(this->timeStep, backward_t, backward_p);
 
     advection();
 # ifdef PERFORMANCE_BENCHMARK
