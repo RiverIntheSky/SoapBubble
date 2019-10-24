@@ -361,16 +361,16 @@ __device__ float sampleMapping_p(float* input, float2& rawId) {
     float lr = input[phiHigher + nPhiGlobal * thetaLower];
     float hl = input[phiLower + nPhiGlobal * thetaHigher];
     float hr = input[phiHigher + nPhiGlobal * thetaHigher];
-    if (ll - lr > 1)
+    if (ll - lr > nThetaGlobal) // nearest distance
     	lr += nPhiGlobal;
-    if (lr - ll > 1)
+    if (lr - ll > nThetaGlobal)
     	ll += nPhiGlobal;
-    if (hl - hr > 1)
+    if (hl - hr > nThetaGlobal)
     	hr += nPhiGlobal;
-    if (hr - hl > 1)
+    if (hr - hl > nThetaGlobal)
     	hl += nPhiGlobal;
     float lerped = bilerp(ll, lr, hl, hr, alphaPhi, alphaTheta);
-    return fmod(lerped, (float)nPhiGlobal);
+    return lerped;
 }
 
 
@@ -392,9 +392,9 @@ inline __device__ float2 traceRK2(float* velTheta, float* velPhi, float& dt,
 				  float2& Id0, size_t pitch){
 
     float2 vel0 = getVelocity(velPhi, velTheta, Id0, pitch);
-    float2 Id1 = Id0 - 0.5 * dt * vel0 * invGridLenGlobal * invRadiusGlobal;
+    float2 Id1 = Id0 - 0.5 * dt * vel0 * invGridLenGlobal;
     float2 vel1 = getVelocity(velPhi, velTheta, Id1, pitch);
-    float2 Id2 = Id1 - dt * vel1 * invGridLenGlobal * invRadiusGlobal;
+    float2 Id2 = Id1 - dt * vel1 * invGridLenGlobal;
 
     return Id2;
 }
@@ -407,13 +407,13 @@ inline __device__ float2 traceRK2(float* velTheta, float* velPhi, float& dt,
  */
 inline __device__ float2 traceRK3(float* velTheta, float* velPhi, float& dt,
 				  float2& Id0, size_t pitch){
-    float c0 = 2.0 / 9.0 * dt * invGridLenGlobal * invRadiusGlobal,
-	c1 = 3.0 / 9.0 * dt * invGridLenGlobal * invRadiusGlobal,
-	c2 = 4.0 / 9.0 * dt * invGridLenGlobal * invRadiusGlobal;
+    float c0 = 2.0 / 9.0 * dt * invGridLenGlobal,
+	c1 = 3.0 / 9.0 * dt * invGridLenGlobal,
+	c2 = 4.0 / 9.0 * dt * invGridLenGlobal;
     float2 vel0 = getVelocity(velPhi, velTheta, Id0, pitch);
-    float2 Id1 = Id0 - 0.5 * dt * vel0 * invGridLenGlobal * invRadiusGlobal;
+    float2 Id1 = Id0 - 0.5 * dt * vel0 * invGridLenGlobal;
     float2 vel1 = getVelocity(velPhi, velTheta, Id1, pitch);
-    float2 Id2 = Id1 - 0.75 * dt * vel1 * invGridLenGlobal * invRadiusGlobal;
+    float2 Id2 = Id1 - 0.75 * dt * vel1 * invGridLenGlobal;
     float2 vel2 = getVelocity(velPhi, velTheta, Id2, pitch);
 
     return Id0 - c0 * vel0 - c1 * vel1 - c2 * vel2;
@@ -439,6 +439,7 @@ __global__ void	updateMappingKernel(float* velTheta, float* velPhi, float dt,
 
     float2 pos = make_float2((float)thetaId, (float)phiId) + centeredOffset;
     float2 back_pos = DMC(velTheta, velPhi, dt, pos, pitch);
+
     tmp_p[thetaId * nPhiGlobal + phiId] = sampleMapping_p(bwd_p, back_pos);
     tmp_t[thetaId * nPhiGlobal + phiId] = sampleCentered(bwd_t, back_pos, nPhiGlobal);
 }
@@ -491,7 +492,7 @@ __global__ void advectionVSpherePhiKernel
 	
 # ifdef RUNGE_KUTTA
     // Traced halfway in phi-theta space
-    deltaS = - 0.5 * u_norm * timeStepGlobal * invRadiusGlobal;
+    deltaS = - 0.5 * u_norm * timeStepGlobal;
     float3 midx = u_ * sinf(deltaS) + w_ * cosf(deltaS);
 
     float2 midCoord = make_float2(acosf(midx.z), atan2f(midx.y, midx.x));
@@ -521,7 +522,7 @@ __global__ void advectionVSpherePhiKernel
     }
 
 # endif
-    deltaS = -u_norm * timeStepGlobal * invRadiusGlobal;
+    deltaS = -u_norm * timeStepGlobal;
     float3 px = u_ * sinf(deltaS) + w_ * cosf(deltaS);
 
     float2 pCoord = make_float2(acosf(px.z), atan2f(px.y, px.x));
@@ -592,7 +593,7 @@ __global__ void advectionVSphereThetaKernel
 
 # ifdef RUNGE_KUTTA
     // Traced halfway in phi-theta space
-    deltaS = - 0.5 * u_norm * timeStepGlobal * invRadiusGlobal;
+    deltaS = - 0.5 * u_norm * timeStepGlobal;
     float3 midx = u_ * sinf(deltaS) + w_ * cosf(deltaS);
 
     float2 midCoord = make_float2(acosf(midx.z), atan2f(midx.y, midx.x));
@@ -622,7 +623,7 @@ __global__ void advectionVSphereThetaKernel
     }
     
 # endif
-    deltaS = -u_norm * timeStepGlobal * invRadiusGlobal;
+    deltaS = -u_norm * timeStepGlobal;
     float3 px = u_ * sinf(deltaS) + w_ * cosf(deltaS);
 
     float2 pCoord = make_float2(acosf(px.z), atan2f(px.y, px.x));
@@ -1004,13 +1005,14 @@ __global__ void advectionCenteredBimocq
 
 void KaminoSolver::updateForward(float dt, float* &fwd_t, float* &fwd_p) {
     float T = 0.0;
-    float substep = std::min(cfldt, dt); // cfl < 1 required
+    float dt_ = dt / radius; // scaled; assume U = 1
+    float substep = std::min(cfldt, dt_); // cfl < 1 required
     
     dim3 gridLayout;
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
-    while (T < dt) {
-	if (T + substep > dt) substep = dt -T;
+    while (T < dt_) {
+	if (T + substep > dt_) substep = dt_ - T;
 	updateMappingKernel<<<gridLayout, blockLayout>>>
 	    (velTheta->getGPUThisStep(), velPhi->getGPUThisStep(), -substep,
 	     fwd_t, fwd_p, tmp_t, tmp_p, pitch);
@@ -1024,13 +1026,14 @@ void KaminoSolver::updateForward(float dt, float* &fwd_t, float* &fwd_p) {
 
 void KaminoSolver::updateBackward(float dt, float* &bwd_t, float* &bwd_p) {
     float T = 0.0;
-    float substep = std::min(cfldt, dt); // cfl < 1 required
-    
+    float dt_ = dt / radius; // scaled; assume U = 1
+    float substep = std::min(cfldt, dt_); // cfl < 1 required
+
     dim3 gridLayout;
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
-    while (T < dt) {
-	if (T + substep > dt) substep = dt -T;
+    while (T < dt_) {
+	if (T + substep > dt_) substep = dt_ - T;
 	updateMappingKernel<<<gridLayout, blockLayout>>>
 	    (velTheta->getGPUThisStep(), velPhi->getGPUThisStep(), substep,
 	     bwd_t, bwd_p, tmp_t, tmp_p, pitch);
@@ -1066,7 +1069,7 @@ void KaminoSolver::updateCFL(){
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaFree(maxVel));
 
-    this->cfldt = gridLen * radius / std::max(std::max(maxu, maxv), eps);
+    this->cfldt = gridLen / std::max(std::max(maxu, maxv), eps);
 }
 
 
@@ -2083,20 +2086,21 @@ void KaminoSolver::bodyforce() {
 }
 
 
+// assumes U = 1
 Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
 	       fReal T, fReal Ds, fReal rm, size_t nTheta, 
 	       float dt, float DT, int frames,
 	       std::string outputDir, std::string thicknessImage,
 	       size_t particleDensity, int device,
 	       std::string AMGconfig):
-    radius(radius), invRadius(1/radius), H(H), U(U), c_m(c_m), Gamma_m(Gamma_m), T(T),
+    radius(radius), invRadius(1/radius), H(H), U(1.0), c_m(c_m), Gamma_m(Gamma_m), T(T),
     Ds(Ds/(U*radius)), gs(g*radius/(U*U)), rm(rm), epsilon(H/radius), sigma_r(R*T), M(Gamma_m*sigma_r/(3*rho*H*U*U)),
     S(sigma_a*epsilon/(2*mu*U)), re(mu/(U*radius*rho)), Cr(rhoa*sqrt(nua*radius/U)/(rho*H)),
     nTheta(nTheta), nPhi(2 * nTheta),
     gridLen(M_PI / nTheta), invGridLen(nTheta / M_PI), 
     dt(dt*U/radius), DT(DT), frames(frames), outputDir(outputDir),
     thicknessImage(thicknessImage), particleDensity(particleDensity), device(device),
-    AMGconfig(AMGconfig)
+    AMGconfig(AMGconfig) 
 {
     boost::filesystem::create_directories(outputDir);
     if (outputDir.back() != '/')
