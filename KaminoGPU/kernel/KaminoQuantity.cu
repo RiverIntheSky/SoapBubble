@@ -1,104 +1,120 @@
 # include "../include/KaminoQuantity.cuh"
 
-void KaminoQuantity::copyToGPU()
-{
+void KaminoQuantity::copyToGPU() {
     /* 
-       Pitch : nPhi * sizeof(fReal)
-       Width : nPhi * sizeof(fReal)
+       Pitch : nPhi * sizeof(float)
+       Width : nPhi * sizeof(float)
        Height: nTheta
     */
     checkCudaErrors(cudaMemcpy2D(gpuThisStep, thisStepPitch, cpuBuffer, 
-				 nPhi * sizeof(fReal), nPhi * sizeof(fReal), nTheta, cudaMemcpyHostToDevice));
+				 nPhi * sizeof(float), nPhi * sizeof(float), nTheta, cudaMemcpyHostToDevice));
 }
 
-void KaminoQuantity::copyBackToCPU()
-{
-    checkCudaErrors(cudaMemcpy2D((void*)this->cpuBuffer, nPhi * sizeof(fReal), (void*)this->gpuThisStep,
-				 this->thisStepPitch, nPhi * sizeof(fReal), nTheta, cudaMemcpyDeviceToHost));
+
+void KaminoQuantity::copyBackToCPU() {
+    checkCudaErrors(cudaMemcpy2D((void*)this->cpuBuffer, nPhi * sizeof(float), (void*)this->gpuThisStep,
+				 this->thisStepPitch, nPhi * sizeof(float), nTheta, cudaMemcpyDeviceToHost));
 }
+
 
 KaminoQuantity::KaminoQuantity(std::string attributeName, size_t nPhi, size_t nTheta,
-			       fReal phiOffset, fReal thetaOffset)
+			       float phiOffset, float thetaOffset)
     : nPhi(nPhi), nTheta(nTheta), gridLen(M_2PI / nPhi), invGridLen(1.0 / gridLen),
-    attrName(attributeName), phiOffset(phiOffset), thetaOffset(thetaOffset)
-{
-    cpuBuffer = new fReal[nPhi * nTheta];
-    checkCudaErrors(cudaMallocPitch((void**)&gpuThisStep, &thisStepPitch, nPhi * sizeof(fReal), nTheta));
-    checkCudaErrors(cudaMallocPitch((void**)&gpuNextStep, &nextStepPitch, nPhi * sizeof(fReal), nTheta));
+    attrName(attributeName), phiOffset(phiOffset), thetaOffset(thetaOffset) {
+    cpuBuffer = new float[nPhi * nTheta];
+    checkCudaErrors(cudaMallocPitch((void**)&gpuThisStep, &thisStepPitch, nPhi * sizeof(float), nTheta));
+    checkCudaErrors(cudaMallocPitch((void**)&gpuNextStep, &nextStepPitch, nPhi * sizeof(float), nTheta));
 }
 
-KaminoQuantity::~KaminoQuantity()
-{
+
+ScalarQuantity::ScalarQuantity(std::string attributeName, size_t nPhi, size_t nTheta,
+			       float phiOffset, float thetaOffset)
+    : KaminoQuantity(attributeName, nPhi, nTheta, phiOffset, thetaOffset) {
+    checkCudaErrors(cudaMallocPitch(&gpuInit, &nextStepPitch, nPhi * sizeof(float), nTheta));
+}
+
+
+KaminoQuantity::~KaminoQuantity() {
     delete[] cpuBuffer;
 
     checkCudaErrors(cudaFree(gpuThisStep));
     checkCudaErrors(cudaFree(gpuNextStep));
 }
 
-std::string KaminoQuantity::getName()
-{
+
+ScalarQuantity::~ScalarQuantity() {
+    checkCudaErrors(cudaFree(gpuInit));
+}
+
+
+std::string KaminoQuantity::getName() {
     return this->attrName;
 }
 
-size_t KaminoQuantity::getNPhi()
-{
+
+size_t KaminoQuantity::getNPhi() {
     return this->nPhi;
 }
 
-size_t KaminoQuantity::getNTheta()
-{
+
+size_t KaminoQuantity::getNTheta() {
     return this->nTheta;
 }
 
-void KaminoQuantity::swapGPUBuffer()
-{
-    fReal* tempPtr = this->gpuThisStep;
+
+void KaminoQuantity::swapGPUBuffer() {
+    float* tempPtr = this->gpuThisStep;
     this->gpuThisStep = this->gpuNextStep;
     this->gpuNextStep = tempPtr;
 }
 
-fReal KaminoQuantity::getCPUValueAt(size_t phi, size_t theta)
-{
+
+float KaminoQuantity::getCPUValueAt(size_t phi, size_t theta) {
     return this->accessCPUValueAt(phi, theta);
 }
 
-void KaminoQuantity::setCPUValueAt(size_t phi, size_t theta, fReal val)
-{
+
+void KaminoQuantity::setCPUValueAt(size_t phi, size_t theta, float val) {
     this->accessCPUValueAt(phi, theta) = val;
 }
 
-fReal& KaminoQuantity::accessCPUValueAt(size_t phi, size_t theta)
-{
+
+float& KaminoQuantity::accessCPUValueAt(size_t phi, size_t theta) {
     assert(theta >= 0 && theta < nTheta && phi >= 0 && phi < nPhi);
     return this->cpuBuffer[theta * nPhi + phi];
 }
 
-fReal KaminoQuantity::getThetaOffset()
-{
+
+float KaminoQuantity::getThetaOffset() {
     return this->thetaOffset;
 }
 
-fReal KaminoQuantity::getPhiOffset()
-{
+
+float KaminoQuantity::getPhiOffset() {
     return this->phiOffset;
 }
 
-fReal* KaminoQuantity::getGPUThisStep()
-{
+
+float* KaminoQuantity::getGPUThisStep() {
     return this->gpuThisStep;
 }
 
-fReal* KaminoQuantity::getGPUNextStep()
-{
+
+float* KaminoQuantity::getGPUNextStep() {
     return this->gpuNextStep;
 }
 
-size_t KaminoQuantity::getThisStepPitchInElements()
-{
-    return this->thisStepPitch / sizeof(fReal);
+
+float* ScalarQuantity::getGPUInit() {
+    return this->gpuInit;
 }
 
-size_t KaminoQuantity::getNextStepPitchInElements()
-{
-    return this->nextStepPitch / sizeof(fReal);
+
+size_t KaminoQuantity::getThisStepPitchInElements() {
+    return this->thisStepPitch / sizeof(float);
+}
+
+
+size_t KaminoQuantity::getNextStepPitchInElements() {
+    return this->nextStepPitch / sizeof(float);
 }

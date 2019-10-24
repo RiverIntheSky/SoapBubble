@@ -100,11 +100,9 @@ private:
 
     KaminoQuantity* velTheta;
     KaminoQuantity* velPhi; // u_phi/(sin(theta)) is stored instead of u_phi
-    KaminoQuantity* thickness;
-    KaminoQuantity* bulkConcentration;
-    KaminoQuantity* surfConcentration;
-    KaminoQuantity* pressure;
-    KaminoQuantity* density;
+    ScalarQuantity* thickness;
+    ScalarQuantity* surfConcentration;
+
     size_t pitch; // all the quantities have the same padding
     void copyVelocity2GPU();
     void copyVelocityBack2CPU();

@@ -110,9 +110,9 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
 				      vPhiPhiOffset, vPhiThetaOffset);
     this->velTheta = new KaminoQuantity("velTheta", nPhi, nTheta - 1,
 					vThetaPhiOffset, vThetaThetaOffset);
-    this->thickness = new KaminoQuantity("eta", nPhi, nTheta,
+    this->thickness = new ScalarQuantity("eta", nPhi, nTheta,
 					 centeredPhiOffset, centeredThetaOffset);
-    this->surfConcentration = new KaminoQuantity("gamma", nPhi, nTheta,
+    this->surfConcentration = new ScalarQuantity("gamma", nPhi, nTheta,
 						 centeredPhiOffset, centeredThetaOffset);
     this->pitch = surfConcentration->getThisStepPitchInElements();
 
@@ -286,7 +286,7 @@ KaminoSolver::~KaminoSolver()
 //     delete this->particles;
 // # endif
 
-    checkCudaErrors(cudaDeviceReset());
+    CHECK_CUDA(cudaDeviceReset());
 
 # ifdef PERFORMANCE_BENCHMARK
     float totalTimeUsed = this->advectionTime + this->bodyforceTime;
@@ -303,11 +303,6 @@ void KaminoSolver::copyVelocity2GPU()
 {
     velPhi->copyToGPU();
     velTheta->copyToGPU();
-}
-
-void KaminoSolver::copyDensity2GPU()
-{
-    density->copyToGPU();
 }
 
 
@@ -480,12 +475,6 @@ void KaminoSolver::copyVelocityBack2CPU()
 }
 
 
-void KaminoSolver::copyDensityBack2CPU()
-{
-    this->density->copyBackToCPU();
-}
-
-
 void KaminoSolver::initWithConst(KaminoQuantity* attrib, fReal val)
 {
     for (size_t i = 0; i < attrib->getNPhi(); ++i) {
@@ -534,7 +523,11 @@ void KaminoSolver::initThicknessfromPic(std::string path, size_t particleDensity
 	    this->rows = image_Flipped.rows;
 	    this->cols = image_Flipped.cols;
    	}
-    }    
+    }
+
+    CHECK_CUDA(cudaMemcpy(this->thickness->getGPUInit(), this->thickness->getGPUThisStep(),
+			  this->thickness->getThisStepPitchInElements() * this->thickness->getNTheta() *
+			  sizeof(float), cudaMemcpyDeviceToDevice));
 
     // this->particles = new KaminoParticles(path, particleDensity, gridLen, nTheta);
 

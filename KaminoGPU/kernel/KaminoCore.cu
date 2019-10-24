@@ -90,6 +90,17 @@ __device__ float kaminoLerp(float from, float to, float alpha)
 
 
 /**
+ * bilinear interpolation
+ */
+__device__ float bilerp(float ll, float lr, float hl, float hr,
+			float alphaPhi, float alphaTheta)
+{
+    return kaminoLerp(kaminoLerp(ll, lr, alphaPhi),
+		      kaminoLerp(hl, hr, alphaPhi), alphaTheta);
+}
+
+
+/**
  * sample velocity in phi direction at position rawId
  * rawId is moved to velPhi coordinates to compensate MAC
  */
@@ -295,6 +306,75 @@ __device__ float sampleCentered(float* input, float2& rawId, size_t pitch) {
 
 
 /**
+ * sample coordinates in mapping
+ */
+__device__ float sampleMapping_p(float* input, float2& rawId) {
+    float2 Id = rawId - centeredOffset;
+
+    bool isFlippedPole = validateCoord(Id);
+
+    int phiIndex = static_cast<int>(floorf(Id.y));
+    int thetaIndex = static_cast<int>(floorf(Id.x));
+    float alphaPhi = Id.y - static_cast<float>(phiIndex);
+    float alphaTheta = Id.x - static_cast<float>(thetaIndex);
+
+    // if (thetaIndex == 0 && isFlippedPole) {
+    // 	size_t phiLower = phiIndex % nPhiGlobal;
+    // 	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+    // 	float higherBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+    // 				      input[phiHigher + pitch * thetaIndex], alphaPhi);
+
+    // 	phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
+    // 	phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
+    // 	float lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+    // 				     input[phiHigher + pitch * thetaIndex], alphaPhi);
+
+    // 	float lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
+    // 	return lerped;
+    // }
+    
+    // if (isFlippedPole) {
+    // 	thetaIndex -= 1;
+    // }
+    
+    // if (thetaIndex == nThetaGlobal - 1) {
+    // 	size_t phiLower = phiIndex % nPhiGlobal;
+    // 	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+    // 	float lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+    // 				     input[phiHigher + pitch * thetaIndex], alphaPhi);
+
+    // 	phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
+    // 	phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
+    // 	float higherBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
+    // 				      input[phiHigher + pitch * thetaIndex], alphaPhi);
+
+    // 	float lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
+    // 	return lerped;
+    // }
+
+    size_t phiLower = phiIndex % nPhiGlobal;
+    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+    size_t thetaLower = thetaIndex;
+    size_t thetaHigher = thetaIndex + 1;
+
+    float ll = input[phiLower + nPhiGlobal * thetaLower];
+    float lr = input[phiHigher + nPhiGlobal * thetaLower];
+    float hl = input[phiLower + nPhiGlobal * thetaHigher];
+    float hr = input[phiHigher + nPhiGlobal * thetaHigher];
+    if (ll - lr > 1)
+    	lr += nPhiGlobal;
+    if (lr - ll > 1)
+    	ll += nPhiGlobal;
+    if (hl - hr > 1)
+    	hr += nPhiGlobal;
+    if (hr - hl > 1)
+    	hl += nPhiGlobal;
+    float lerped = bilerp(ll, lr, hl, hr, alphaPhi, alphaTheta);
+    return fmod(lerped, (float)nPhiGlobal);
+}
+
+
+/**
  * @return (velTheta, velPhi)
  */
 inline __device__ float2 getVelocity(float* velPhi, float* velTheta, float2 &Id, size_t pitch){
@@ -312,9 +392,9 @@ inline __device__ float2 traceRK2(float* velTheta, float* velPhi, float& dt,
 				  float2& Id0, size_t pitch){
 
     float2 vel0 = getVelocity(velPhi, velTheta, Id0, pitch);
-    float2 Id1 = Id0 - 0.5 * dt * vel0 * invGridLenGlobal;
+    float2 Id1 = Id0 - 0.5 * dt * vel0 * invGridLenGlobal * invRadiusGlobal;
     float2 vel1 = getVelocity(velPhi, velTheta, Id1, pitch);
-    float2 Id2 = Id1 - dt * vel1 * invGridLenGlobal;
+    float2 Id2 = Id1 - dt * vel1 * invGridLenGlobal * invRadiusGlobal;
 
     return Id2;
 }
@@ -327,13 +407,13 @@ inline __device__ float2 traceRK2(float* velTheta, float* velPhi, float& dt,
  */
 inline __device__ float2 traceRK3(float* velTheta, float* velPhi, float& dt,
 				  float2& Id0, size_t pitch){
-    float c0 = 2.0 / 9.0 * dt * invGridLenGlobal,
-	c1 = 3.0 / 9.0 * dt * invGridLenGlobal,
-	c2 = 4.0 / 9.0 * dt * invGridLenGlobal;
+    float c0 = 2.0 / 9.0 * dt * invGridLenGlobal * invRadiusGlobal,
+	c1 = 3.0 / 9.0 * dt * invGridLenGlobal * invRadiusGlobal,
+	c2 = 4.0 / 9.0 * dt * invGridLenGlobal * invRadiusGlobal;
     float2 vel0 = getVelocity(velPhi, velTheta, Id0, pitch);
-    float2 Id1 = Id0 - 0.5 * dt * vel0 * invGridLenGlobal;
+    float2 Id1 = Id0 - 0.5 * dt * vel0 * invGridLenGlobal * invRadiusGlobal;
     float2 vel1 = getVelocity(velPhi, velTheta, Id1, pitch);
-    float2 Id2 = Id1 - 0.75 * dt * vel1 * invGridLenGlobal;
+    float2 Id2 = Id1 - 0.75 * dt * vel1 * invGridLenGlobal * invRadiusGlobal;
     float2 vel2 = getVelocity(velPhi, velTheta, Id2, pitch);
 
     return Id0 - c0 * vel0 - c1 * vel1 - c2 * vel2;
@@ -359,7 +439,7 @@ __global__ void	updateMappingKernel(float* velTheta, float* velPhi, float dt,
 
     float2 pos = make_float2((float)thetaId, (float)phiId) + centeredOffset;
     float2 back_pos = DMC(velTheta, velPhi, dt, pos, pitch);
-    tmp_p[thetaId * nPhiGlobal + phiId] = sampleCentered(bwd_p, back_pos, nPhiGlobal);
+    tmp_p[thetaId * nPhiGlobal + phiId] = sampleMapping_p(bwd_p, back_pos);
     tmp_t[thetaId * nPhiGlobal + phiId] = sampleCentered(bwd_t, back_pos, nPhiGlobal);
 }
 
@@ -411,7 +491,7 @@ __global__ void advectionVSpherePhiKernel
 	
 # ifdef RUNGE_KUTTA
     // Traced halfway in phi-theta space
-    deltaS = - 0.5 * u_norm * timeStepGlobal;
+    deltaS = - 0.5 * u_norm * timeStepGlobal * invRadiusGlobal;
     float3 midx = u_ * sinf(deltaS) + w_ * cosf(deltaS);
 
     float2 midCoord = make_float2(acosf(midx.z), atan2f(midx.y, midx.x));
@@ -441,7 +521,7 @@ __global__ void advectionVSpherePhiKernel
     }
 
 # endif
-    deltaS = -u_norm * timeStepGlobal;
+    deltaS = -u_norm * timeStepGlobal * invRadiusGlobal;
     float3 px = u_ * sinf(deltaS) + w_ * cosf(deltaS);
 
     float2 pCoord = make_float2(acosf(px.z), atan2f(px.y, px.x));
@@ -512,7 +592,7 @@ __global__ void advectionVSphereThetaKernel
 
 # ifdef RUNGE_KUTTA
     // Traced halfway in phi-theta space
-    deltaS = - 0.5 * u_norm * timeStepGlobal;
+    deltaS = - 0.5 * u_norm * timeStepGlobal * invRadiusGlobal;
     float3 midx = u_ * sinf(deltaS) + w_ * cosf(deltaS);
 
     float2 midCoord = make_float2(acosf(midx.z), atan2f(midx.y, midx.x));
@@ -542,7 +622,7 @@ __global__ void advectionVSphereThetaKernel
     }
     
 # endif
-    deltaS = -u_norm * timeStepGlobal;
+    deltaS = -u_norm * timeStepGlobal * invRadiusGlobal;
     float3 px = u_ * sinf(deltaS) + w_ * cosf(deltaS);
 
     float2 pCoord = make_float2(acosf(px.z), atan2f(px.y, px.x));
@@ -632,7 +712,7 @@ __global__ void advectionCentered
     int thetaId = blockIdx.x / splitVal;
     
     // Coord in scalar space
-    float2 gId = make_float2((float)thetaId, (float)phiId) + centeredPhiOffset;
+    float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
 
 # ifdef RK3
     float2 traceId = traceRK3(velTheta, velPhi, timeStepGlobal, gId, pitch);
@@ -646,7 +726,43 @@ __global__ void advectionCentered
 };
 
 
+inline __device__ float2 sampleMapping(float* map_t, float* map_p, float2& posId){
+    return make_float2(sampleCentered(map_t, posId, nPhiGlobal), sampleMapping_p(map_p, posId));
+		       //sampleMapping_t(map_t, posId)); // TODO
+}
 
+
+__global__ void advectionCenteredBimocq
+(float* thicknessOutput, float* gammaOutput, float* thicknessInit, float* gammaInit,
+ float* bwd_t, float* bwd_p, size_t pitch) {
+    float w[5] = {0.125f, 0.125f, 0.125f, 0.125f, 0.5f};
+    float2 dir[5] = {make_float2(-0.25f,-0.25f),
+		     make_float2(0.25f, -0.25f),
+		     make_float2(-0.25f, 0.25f),
+		     make_float2( 0.25f, 0.25f),
+		     make_float2(0.f, 0.f)};
+
+    // Index
+    int splitVal = nPhiGlobal / blockDim.x;
+    int threadSequence = blockIdx.x % splitVal;
+    int phiId = threadIdx.x + threadSequence * blockDim.x;
+    int thetaId = blockIdx.x / splitVal;
+    
+    // Coord in scalar space
+    float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
+
+    float thickness = 0.f;
+    float gamma = 0.f;
+    for (int i = 0; i < 5; i++) {
+	float2 posId = gId + dir[i];
+	float2 initPosId = sampleMapping(bwd_t, bwd_p, posId);
+	thickness += w[i] * sampleCentered(thicknessInit, initPosId, pitch);
+	gamma += w[i] * sampleCentered(gammaInit, initPosId, pitch);
+	// + dEta & dGamma
+    }
+    thicknessOutput[thetaId * pitch + phiId] = thickness;
+    gammaOutput[thetaId * pitch + phiId] = gamma;
+}
 // __global__ void advectionAllCentered
 // (fReal* thicknessOutput, fReal* surfOutput, fReal* thicknessInput, fReal* surfInput, fReal* velPhi, fReal* velTheta, size_t nPitchInElements)
 // {
@@ -950,7 +1066,7 @@ void KaminoSolver::updateCFL(){
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaFree(maxVel));
 
-    this->cfldt = gridLen / std::max(std::max(maxu, maxv), eps);
+    this->cfldt = gridLen * radius / std::max(std::max(maxu, maxv), eps);
 }
 
 
@@ -979,18 +1095,23 @@ void KaminoSolver::advection()
 // # else
     advectionVThetaKernel<<<gridLayout, blockLayout>>>
 	(velTheta->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velTheta->getNextStepPitchInElements());
-    // # endif
+    //# endif
     checkCudaErrors(cudaGetLastError());
-    //    checkCudaErrors(cudaDeviceSynchronize());
+    // checkCudaErrors(cudaDeviceSynchronize());
    
 
     // Advect concentration
     determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
-    advectionCentered<<<gridLayout, blockLayout>>>
-	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
-	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), surfConcentration->getNextStepPitchInElements());
+    advectionCenteredBimocq<<<gridLayout, blockLayout>>>
+    	(thickness->getGPUNextStep(), surfConcentration->getGPUNextStep(), thickness->getGPUInit(),
+    	 surfConcentration->getGPUInit(), backward_t, backward_p, pitch);
+
+
+    // advectionCentered<<<gridLayout, blockLayout>>>
+    // 	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
+    // 	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), surfConcentration->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
-    // checkCudaErrors(cudaDeviceSynchronize());
+    //    checkCudaErrors(cudaDeviceSynchronize());
  
     // Advect thickness particles
     // if (particles->numOfParticles > 0) {
@@ -1015,12 +1136,13 @@ void KaminoSolver::advection()
     // }
 
     // average particle information
-    // If numOfParticles == 0, choose semi-Lagrangian advection 
-    determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
-    advectionCentered<<<gridLayout, blockLayout>>>
-	(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
-	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), thickness->getNextStepPitchInElements());
-    checkCudaErrors(cudaGetLastError());
+    // If numOfParticles == 0, choose semi-Lagrangian advection
+    
+    // determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
+    // advectionCentered<<<gridLayout, blockLayout>>>
+    // 	(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
+    // 	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), thickness->getNextStepPitchInElements());
+    // checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
     thickness->swapGPUBuffer();

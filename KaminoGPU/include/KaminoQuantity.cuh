@@ -4,7 +4,7 @@
 
 class KaminoQuantity
 {
-private:
+protected:
     /* Name of the attribute */
     std::string attrName;
 
@@ -13,20 +13,20 @@ private:
     size_t nTheta;
 
     /* Grid size */
-    fReal gridLen;
+    float gridLen;
     /* 1.0 / gridlen */
-    fReal invGridLen;
+    float invGridLen;
 
     /* Staggered? */
-    fReal phiOffset;
-    fReal thetaOffset;
+    float phiOffset;
+    float thetaOffset;
 
     /* Initial buffer at client side */
-    fReal* cpuBuffer;
+    float* cpuBuffer;
     /* Double pitch buffer at server side */
-    fReal* gpuThisStep;
+    float* gpuThisStep;
     size_t thisStepPitch;
-    fReal* gpuNextStep;
+    float* gpuNextStep;
     size_t nextStepPitch;
 
     //cudaChannelFormatDesc desc;
@@ -36,7 +36,7 @@ private:
 public:
     /* Constructor */
     KaminoQuantity(std::string attributeName, size_t nPhi, size_t nTheta,
-		   fReal phiOffset, fReal thetaOffset);
+		   float phiOffset, float thetaOffset);
     /* Destructor */
     ~KaminoQuantity();
 
@@ -54,19 +54,34 @@ public:
     /* Get theta dimension size */
     size_t getNTheta();
     /* Get the current step */
-    fReal getCPUValueAt(size_t x, size_t y);
+    float getCPUValueAt(size_t x, size_t y);
     /* Set the current step */
-    void setCPUValueAt(size_t x, size_t y, fReal val);
+    void setCPUValueAt(size_t x, size_t y, float val);
     /* Access */
-    fReal& accessCPUValueAt(size_t x, size_t y);
+    float& accessCPUValueAt(size_t x, size_t y);
     /* Get the offset */
-    fReal getPhiOffset();
-    fReal getThetaOffset();
-    fReal* getGPUThisStep();
-    fReal* getGPUNextStep();
+    float getPhiOffset();
+    float getThetaOffset();
+    float* getGPUThisStep();
+    float* getGPUNextStep();
 
     size_t getThisStepPitchInElements();
     size_t getNextStepPitchInElements();
 
     static cudaChannelFormatDesc channelFormat;
+};
+
+
+class ScalarQuantity: public KaminoQuantity {
+private:
+    /* initial value */
+    float* gpuInit;
+public:
+    /* Constructor */
+    ScalarQuantity(std::string attributeName, size_t nPhi, size_t nTheta,
+		   float phiOffset, float thetaOffset);
+    /* Destructor */
+    ~ScalarQuantity();
+
+    float* getGPUInit();
 };
