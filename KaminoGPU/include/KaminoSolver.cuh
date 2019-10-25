@@ -169,6 +169,7 @@ public:
     ~KaminoSolver();
 
     void initWithConst(KaminoQuantity* attrib, float val);
+    void initWithConst(ScalarQuantity* attrib, float val);
     void initThicknessfromPic(std::string path, size_t particleDensity);
     void initParticlesfromPic(std::string path, size_t parPergrid);
 

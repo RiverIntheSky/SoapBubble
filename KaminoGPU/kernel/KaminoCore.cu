@@ -74,7 +74,7 @@ __device__ bool validateCoord(float2& Id) {
     	ret = !ret;
     }
     if (Id.x > nThetaGlobal || Id.x < 0)
-	printf("Warning: step size too large! Id.x = %f\n", Id.x);
+	printf("Warning: step size too large! theta = %f\n", Id.x);
     Id.y = fmod(Id.y + nPhiGlobal, (float)nPhiGlobal);
     return ret;
 }
@@ -306,75 +306,6 @@ __device__ float sampleCentered(float* input, float2& rawId, size_t pitch) {
 
 
 /**
- * sample coordinates in mapping
- */
-__device__ float sampleMapping_p(float* input, float2& rawId) {
-    float2 Id = rawId - centeredOffset;
-
-    bool isFlippedPole = validateCoord(Id);
-
-    int phiIndex = static_cast<int>(floorf(Id.y));
-    int thetaIndex = static_cast<int>(floorf(Id.x));
-    float alphaPhi = Id.y - static_cast<float>(phiIndex);
-    float alphaTheta = Id.x - static_cast<float>(thetaIndex);
-
-    // if (thetaIndex == 0 && isFlippedPole) {
-    // 	size_t phiLower = phiIndex % nPhiGlobal;
-    // 	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
-    // 	float higherBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
-    // 				      input[phiHigher + pitch * thetaIndex], alphaPhi);
-
-    // 	phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
-    // 	phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
-    // 	float lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
-    // 				     input[phiHigher + pitch * thetaIndex], alphaPhi);
-
-    // 	float lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
-    // 	return lerped;
-    // }
-    
-    // if (isFlippedPole) {
-    // 	thetaIndex -= 1;
-    // }
-    
-    // if (thetaIndex == nThetaGlobal - 1) {
-    // 	size_t phiLower = phiIndex % nPhiGlobal;
-    // 	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
-    // 	float lowerBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
-    // 				     input[phiHigher + pitch * thetaIndex], alphaPhi);
-
-    // 	phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
-    // 	phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
-    // 	float higherBelt = kaminoLerp(input[phiLower + pitch * thetaIndex],
-    // 				      input[phiHigher + pitch * thetaIndex], alphaPhi);
-
-    // 	float lerped = kaminoLerp(lowerBelt, higherBelt, alphaTheta);
-    // 	return lerped;
-    // }
-
-    size_t phiLower = phiIndex % nPhiGlobal;
-    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
-    size_t thetaLower = thetaIndex;
-    size_t thetaHigher = thetaIndex + 1;
-
-    float ll = input[phiLower + nPhiGlobal * thetaLower];
-    float lr = input[phiHigher + nPhiGlobal * thetaLower];
-    float hl = input[phiLower + nPhiGlobal * thetaHigher];
-    float hr = input[phiHigher + nPhiGlobal * thetaHigher];
-    if (ll - lr > nThetaGlobal) // nearest distance
-    	lr += nPhiGlobal;
-    if (lr - ll > nThetaGlobal)
-    	ll += nPhiGlobal;
-    if (hl - hr > nThetaGlobal)
-    	hr += nPhiGlobal;
-    if (hr - hl > nThetaGlobal)
-    	hl += nPhiGlobal;
-    float lerped = bilerp(ll, lr, hl, hr, alphaPhi, alphaTheta);
-    return lerped;
-}
-
-
-/**
  * @return (velTheta, velPhi)
  */
 inline __device__ float2 getVelocity(float* velPhi, float* velTheta, float2 &Id, size_t pitch){
@@ -428,6 +359,98 @@ inline __device__ float2 DMC(float* velTheta, float* velPhi, float& dt, float2& 
 }
 
 
+inline __device__ float2 lerpCoords(float2 from, float2 to, float alpha) {
+    from *= gridLenGlobal;
+    to *= gridLenGlobal;
+    float3 from3 = normalize(make_float3(cos(from.y) * sin(from.x),
+					 sin(from.y) * sin(from.x),
+					 cos(from.x)));
+    float3 to3 = normalize(make_float3(cos(to.y) * sin(to.x),
+				       sin(to.y) * sin(to.x),
+				       cos(to.x)));
+    float3 k = normalize(cross(from3, to3));
+    if (isnan(k.x))
+	return from;
+    float span = acosf(clamp(dot(from3, to3), -1.0, 1.0));
+    alpha *= span;
+    float3 interpolated3 = from3 * cosf(alpha) + cross(k, from3) * sinf(alpha)
+	+ k * dot(k, from3) * (1 - cosf(alpha));
+    return invGridLenGlobal * make_float2(acosf(clamp(interpolated3.z, -1.0, 1.0)),
+					  atan2f(interpolated3.y,
+						 interpolated3.x));
+}
+
+
+__device__ float2 sampleMapping(float* map_t, float* map_p, float2& rawId){
+    float2 Id = rawId - centeredOffset;
+    bool isFlippedPole = validateCoord(Id);
+
+    int phiIndex = static_cast<int>(floorf(Id.y));
+    int thetaIndex = static_cast<int>(floorf(Id.x));
+    float alphaPhi = Id.y - static_cast<float>(phiIndex);
+    float alphaTheta = Id.x - static_cast<float>(thetaIndex);
+
+    float2 ll, lr, hl, hr;
+    if (isFlippedPole) {
+	if (thetaIndex == 0) {
+	    size_t phiLower = phiIndex % nPhiGlobal;
+	    size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+
+	    hl.x = map_t[phiLower + nPhiGlobal * thetaIndex];
+	    hl.y = map_p[phiLower + nPhiGlobal * thetaIndex];
+	    hr.x = map_t[phiHigher + nPhiGlobal * thetaIndex];
+	    hr.y = map_p[phiHigher + nPhiGlobal * thetaIndex];
+
+	    phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
+	    phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
+
+	    ll.x = map_t[phiLower + nPhiGlobal * thetaIndex];
+	    ll.y = map_p[phiLower + nPhiGlobal * thetaIndex];
+	    lr.x = map_t[phiHigher + nPhiGlobal * thetaIndex];
+	    lr.y = map_p[phiHigher + nPhiGlobal * thetaIndex];
+	} else {
+	    thetaIndex -= 1;
+	}
+    }
+
+    if (thetaIndex == nThetaGlobal - 1) {
+	size_t phiLower = phiIndex % nPhiGlobal;
+	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+
+	ll.x = map_t[phiLower + nPhiGlobal * thetaIndex];
+	ll.y = map_p[phiLower + nPhiGlobal * thetaIndex];
+	lr.x = map_t[phiHigher + nPhiGlobal * thetaIndex];
+	lr.y = map_p[phiHigher + nPhiGlobal * thetaIndex];
+
+	phiLower = (phiLower + nPhiGlobal / 2) % nPhiGlobal;
+	phiHigher = (phiHigher + nPhiGlobal / 2) % nPhiGlobal;
+
+	hl.x = map_t[phiLower + nPhiGlobal * thetaIndex];
+	hl.y = map_p[phiLower + nPhiGlobal * thetaIndex];
+	hr.x = map_t[phiHigher + nPhiGlobal * thetaIndex];
+	hr.y = map_p[phiHigher + nPhiGlobal * thetaIndex];
+    } else {
+	size_t phiLower = phiIndex % nPhiGlobal;
+	size_t phiHigher = (phiLower + 1) % nPhiGlobal;
+	size_t thetaLower = thetaIndex;
+	size_t thetaHigher = thetaIndex + 1;
+
+	ll.x = map_t[phiLower + nPhiGlobal * thetaLower];
+	ll.y = map_p[phiLower + nPhiGlobal * thetaLower];
+	lr.x = map_t[phiHigher + nPhiGlobal * thetaLower];
+	lr.y = map_p[phiHigher + nPhiGlobal * thetaLower];
+	hl.x = map_t[phiLower + nPhiGlobal * thetaHigher];
+	hl.y = map_p[phiLower + nPhiGlobal * thetaHigher];
+	hr.x = map_t[phiHigher + nPhiGlobal * thetaHigher];
+	hr.y = map_p[phiHigher + nPhiGlobal * thetaHigher];
+    }
+
+    return lerpCoords(lerpCoords(ll, lr, alphaPhi),
+		      lerpCoords(hl, hr, alphaPhi), alphaTheta);
+
+}
+
+
 __global__ void	updateMappingKernel(float* velTheta, float* velPhi, float dt,
 				     float* bwd_t, float* bwd_p,
 				     float* tmp_t, float* tmp_p, size_t pitch){
@@ -440,8 +463,9 @@ __global__ void	updateMappingKernel(float* velTheta, float* velPhi, float dt,
     float2 pos = make_float2((float)thetaId, (float)phiId) + centeredOffset;
     float2 back_pos = DMC(velTheta, velPhi, dt, pos, pitch);
 
-    tmp_p[thetaId * nPhiGlobal + phiId] = sampleMapping_p(bwd_p, back_pos);
-    tmp_t[thetaId * nPhiGlobal + phiId] = sampleCentered(bwd_t, back_pos, nPhiGlobal);
+    float2 sampledId = sampleMapping(bwd_t, bwd_p, back_pos);
+    tmp_p[thetaId * nPhiGlobal + phiId] = sampledId.y;
+    tmp_t[thetaId * nPhiGlobal + phiId] = sampledId.x;
 }
 
 
@@ -725,12 +749,6 @@ __global__ void advectionCentered
 
     attributeOutput[thetaId * pitch + phiId] = advectedAttribute;
 };
-
-
-inline __device__ float2 sampleMapping(float* map_t, float* map_p, float2& posId){
-    return make_float2(sampleCentered(map_t, posId, nPhiGlobal), sampleMapping_p(map_p, posId));
-		       //sampleMapping_t(map_t, posId)); // TODO
-}
 
 
 __global__ void advectionCenteredBimocq
@@ -1080,25 +1098,25 @@ void KaminoSolver::advection()
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
 
-// # ifdef sphere
-//     advectionVSpherePhiKernel<<<gridLayout, blockLayout>>>
-// 	(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velPhi->getNextStepPitchInElements());
-// # else
+# ifdef sphere
+    advectionVSpherePhiKernel<<<gridLayout, blockLayout>>>
+	(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velPhi->getNextStepPitchInElements());
+# else
     advectionVPhiKernel<<<gridLayout, blockLayout>>>
     	(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velPhi->getNextStepPitchInElements());
-    //# endif
+    # endif
     checkCudaErrors(cudaGetLastError());
     // checkCudaErrors(cudaDeviceSynchronize());
 
     // Advect Theta
     determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
-// # ifdef sphere
-//     advectionVSphereThetaKernel<<<gridLayout, blockLayout>>>
-// 	(velTheta->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velTheta->getNextStepPitchInElements());
-// # else
+# ifdef sphere
+     advectionVSphereThetaKernel<<<gridLayout, blockLayout>>>
+ 	(velTheta->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velTheta->getNextStepPitchInElements());
+# else
     advectionVThetaKernel<<<gridLayout, blockLayout>>>
 	(velTheta->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velTheta->getNextStepPitchInElements());
-    //# endif
+# endif
     checkCudaErrors(cudaGetLastError());
     // checkCudaErrors(cudaDeviceSynchronize());
    

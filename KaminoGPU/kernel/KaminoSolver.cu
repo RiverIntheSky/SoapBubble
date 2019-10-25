@@ -117,8 +117,8 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
     this->pitch = surfConcentration->getThisStepPitchInElements();
 
     initWithConst(this->velPhi, 0.0);
-    initialize_velocity();
     initWithConst(this->velTheta, 0.0);
+    // initialize_velocity();
     initWithConst(this->thickness, 1.0);
     initWithConst(this->surfConcentration, 1.0);
 
@@ -453,7 +453,7 @@ void KaminoSolver::stepForward() {
     this->advectionTime += timer.stopTimer() * 0.001f;
     timer.startTimer();
 # endif
-    // bodyforce();
+    bodyforce();
 # ifdef PERFORMANCE_BENCHMARK
     this->bodyforceTime += timer.stopTimer() * 0.001f;
 # endif
@@ -483,6 +483,20 @@ void KaminoSolver::initWithConst(KaminoQuantity* attrib, fReal val)
 	    }
     }
     attrib->copyToGPU();
+}
+
+
+void KaminoSolver::initWithConst(ScalarQuantity* attrib, fReal val)
+{
+    for (size_t i = 0; i < attrib->getNPhi(); ++i) {
+	for (size_t j = 0; j < attrib->getNTheta(); ++j) {
+		attrib->setCPUValueAt(i, j, val);
+	    }
+    }
+    attrib->copyToGPU();
+    CHECK_CUDA(cudaMemcpy(attrib->getGPUInit(), attrib->getGPUThisStep(),
+			  pitch * attrib->getNTheta() *
+			  sizeof(float), cudaMemcpyDeviceToDevice));
 }
 
 
