@@ -447,6 +447,7 @@ void KaminoSolver::stepForward() {
 
     updateForward(this->timeStep, forward_t, forward_p);
     updateBackward(this->timeStep, backward_t, backward_p);
+    std::cout << "max distortion " << estimateDistortion() << std::endl;
 
     advection();
 # ifdef PERFORMANCE_BENCHMARK

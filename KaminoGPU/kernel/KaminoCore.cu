@@ -25,29 +25,71 @@ static __constant__ float UGlobal;
 
 
 /**
- * return the maximal value in array vel
- * usage: maxVelKernel<<<gridSize, blockSize>>>(maxVel, vel);
- *        maxVelKernel<<<1, blockSize>>>(maxVel, maxVel);
+ * query value at coordinate
  */
-__global__ void maxVelKernel(float* maxVel, float* vel){
-    __shared__ float maxVelTile[MAX_BLOCK_SIZE];
+inline __device__ float& at(float* &array, int &thetaId, int &phiId) {
+    return array[phiId + thetaId * nPhiGlobal];
+}
+
+
+inline __device__ float& at(float* &array, int2 &Id) {
+    return array[Id.y + Id.x * nPhiGlobal];
+}
+
+
+/**
+ * query value in pitched memory at coordinate
+ */
+inline __device__ float& at(float* array, int thetaId, int phiId, size_t pitch) {
+    return array[phiId + thetaId * pitch];
+}
+
+
+inline __device__ float& at(float* array, int2 Id, size_t pitch) {
+    return array[Id.y + Id.x * pitch];
+}
+
+
+/**
+ * distance between two coordinates on the sphere (unit in grid)
+ */
+inline __device__ float dist(float2 Id1, float2 Id2) {
+    Id1 *= gridLenGlobal;
+    Id2 *= gridLenGlobal;
+    float3 Id13 = normalize(make_float3(cos(Id1.y) * sin(Id1.x),
+					sin(Id1.y) * sin(Id1.x),
+					cos(Id1.x)));
+    float3 Id23 = normalize(make_float3(cos(Id2.y) * sin(Id2.x),
+					sin(Id2.y) * sin(Id2.x),
+					cos(Id2.x)));
+    return invGridLenGlobal * acosf(clamp(dot(Id13, Id23), -1.0, 1.0));
+}
+    
+
+/**
+ * return the maximal absolute value in array vel
+ * usage: maxValKernel<<<gridSize, blockSize>>>(maxVal, vel);
+ *        maxValKernel<<<1, blockSize>>>(maxVal, maxVal);
+ */
+__global__ void maxValKernel(float* maxVal, float* vel){
+    __shared__ float maxValTile[MAX_BLOCK_SIZE];
 	
     int tid = threadIdx.x;
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    maxVelTile[tid] = fabsf(vel[i]);
+    maxValTile[tid] = fabsf(vel[i]);
     __syncthreads();   
     //sequential addressing by reverse loop and thread-id based indexing
     for (int s = blockDim.x / 2; s > 0; s >>= 1) {
 	if (tid < s) {
-	    if (maxVelTile[tid + s] > maxVelTile[tid])
-		maxVelTile[tid] = maxVelTile[tid + s];
+	    if (maxValTile[tid + s] > maxValTile[tid])
+		maxValTile[tid] = maxValTile[tid + s];
 	}
 	__syncthreads();
     }
     
     if (tid == 0) {
-	maxVel[blockIdx.x] = maxVelTile[0];
+	maxVal[blockIdx.x] = maxValTile[0];
     }
 }
 
@@ -1071,29 +1113,87 @@ void KaminoSolver::updateBackward(float dt, float* &bwd_t, float* &bwd_p) {
 
 
 void KaminoSolver::updateCFL(){
-    float *maxVel;
-    CHECK_CUDA(cudaMalloc(&maxVel, MAX_BLOCK_SIZE * sizeof(float)));
+    float *maxVal;
+    CHECK_CUDA(cudaMalloc(&maxVal, MAX_BLOCK_SIZE * sizeof(float)));
 
     dim3 gridLayout;
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getThisStepPitchInElements());
-    maxVelKernel<<<gridLayout, blockLayout>>>(maxVel, velTheta->getGPUThisStep());
+    maxValKernel<<<gridLayout, blockLayout>>>(maxVal, velTheta->getGPUThisStep());
     CHECK_CUDA(cudaDeviceSynchronize());
-    maxVelKernel<<<1, blockLayout>>>(maxVel, maxVel);
-    CHECK_CUDA(cudaMemcpy(&(this->maxv), maxVel, sizeof(float),
+    maxValKernel<<<1, blockLayout>>>(maxVal, maxVal);
+    CHECK_CUDA(cudaMemcpy(&(this->maxv), maxVal, sizeof(float),
      			  cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaMemset(maxVel, 0, MAX_BLOCK_SIZE * sizeof(float)));
+    CHECK_CUDA(cudaMemset(maxVal, 0, MAX_BLOCK_SIZE * sizeof(float)));
 
     determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getThisStepPitchInElements());
-    maxVelKernel<<<gridLayout, blockLayout>>>(maxVel, velPhi->getGPUThisStep());
+    maxValKernel<<<gridLayout, blockLayout>>>(maxVal, velPhi->getGPUThisStep());
     CHECK_CUDA(cudaDeviceSynchronize());
-    maxVelKernel<<<1, blockLayout>>>(maxVel, maxVel);
-    CHECK_CUDA(cudaMemcpy(&(this->maxu), maxVel, sizeof(float),
+    maxValKernel<<<1, blockLayout>>>(maxVal, maxVal);
+    CHECK_CUDA(cudaMemcpy(&(this->maxu), maxVal, sizeof(float),
      			  cudaMemcpyDeviceToHost));    
     CHECK_CUDA(cudaGetLastError());
-    CHECK_CUDA(cudaFree(maxVel));
+    CHECK_CUDA(cudaFree(maxVal));
 
     this->cfldt = gridLen / std::max(std::max(maxu, maxv), eps);
+}
+
+
+__global__ void estimateDistortionKernel(float* map1_t, float* map1_p,
+					 float* map2_t, float* map2_p, float* result) {
+    // Index
+    int splitVal = nPhiGlobal / blockDim.x;
+    int threadSequence = blockIdx.x % splitVal;
+    int phiId = threadIdx.x + threadSequence * blockDim.x;
+    int thetaId = blockIdx.x / splitVal;
+    
+    int2 Id = make_int2(thetaId, phiId);
+    
+    // Coord in scalar space
+    float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
+
+    // sample map2 using the entries of map 1
+    float2 pos1 = make_float2(at(map1_t, Id), at(map1_p, Id));
+    float2 pos2 = sampleMapping(map2_t, map2_p, pos1);
+    //    printf("gId %f %f pos2 %f %f dist %f\n", gId.x, gId.y, pos2.x, pos2.y, dist(gId, pos2));
+    at(result, Id) = dist(gId, pos2);
+}
+
+
+float KaminoSolver::estimateDistortion() {
+    float *maxVal, dist1, dist2;
+    CHECK_CUDA(cudaMalloc(&maxVal, MAX_BLOCK_SIZE * sizeof(float)));
+    
+    dim3 gridLayout;
+    dim3 blockLayout;
+    determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+
+    // forward then backward, result saved to tmp_t
+    estimateDistortionKernel<<<gridLayout, blockLayout>>>
+	(forward_t, forward_p, backward_t, backward_p, tmp_t);
+    // backward then forward, result saved to tmp_p
+    estimateDistortionKernel<<<gridLayout, blockLayout>>>
+	(backward_t, backward_p, forward_t, forward_p, tmp_p);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    CHECK_CUDA(cudaGetLastError());
+
+    maxValKernel<<<gridLayout, blockLayout>>>(maxVal, tmp_t);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    maxValKernel<<<1, blockLayout>>>(maxVal, maxVal);  
+    CHECK_CUDA(cudaMemcpy(&(dist1), maxVal, sizeof(float),
+     			  cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemset(maxVal, 0, MAX_BLOCK_SIZE * sizeof(float)));
+    
+    maxValKernel<<<gridLayout, blockLayout>>>(maxVal, tmp_p);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    maxValKernel<<<1, blockLayout>>>(maxVal, maxVal);
+    CHECK_CUDA(cudaMemcpy(&(dist2), maxVal, sizeof(float),
+     			  cudaMemcpyDeviceToHost));
+
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaFree(maxVal));
+
+    return max(dist1, dist2);
 }
 
 
@@ -1128,17 +1228,25 @@ void KaminoSolver::advection()
    
 
     // Advect concentration
+    bool useBimocq = true;
     determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
-    advectionCenteredBimocq<<<gridLayout, blockLayout>>>
-    	(thickness->getGPUNextStep(), thickness->getGPUInit(), thickness->getGPUDelta(),
-    	 backward_t, backward_p, pitch);
-        checkCudaErrors(cudaGetLastError());
-
+    if (useBimocq) {
+	advectionCenteredBimocq<<<gridLayout, blockLayout>>>
+	    (thickness->getGPUNextStep(), thickness->getGPUInit(), thickness->getGPUDelta(),
+	     backward_t, backward_p, pitch);
+    } else {
+	advectionCentered<<<gridLayout, blockLayout>>>
+	    (thickness->getGPUNextStep(), thickness->getGPUThisStep(),
+	     velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), thickness->getNextStepPitchInElements());
+    }
+    checkCudaErrors(cudaGetLastError());
 
     advectionCentered<<<gridLayout, blockLayout>>>
-    	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
-    	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), surfConcentration->getNextStepPitchInElements());
+	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
+	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), surfConcentration->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
+
     //    checkCudaErrors(cudaDeviceSynchronize());
  
     // Advect thickness particles
@@ -1167,11 +1275,6 @@ void KaminoSolver::advection()
     // If numOfParticles == 0, choose semi-Lagrangian advection
     
     // determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
-    // advectionCentered<<<gridLayout, blockLayout>>>
-    // 	(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
-    // 	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), thickness->getNextStepPitchInElements());
-    // checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
 
     thickness->swapGPUBuffer();
     //    particles->swapGPUBuffers(); 
@@ -1950,7 +2053,7 @@ __global__ void applyforceThickness
     float f = div[thetaId * nPhiGlobal + phiId];
 
     thicknessOutput[thetaId * pitch + phiId] = eta * (1 - timeStepGlobal * f);
-    thicknessDelta[thetaId * nPhiGlobal + phiId] = thicknessOutput[thetaId * pitch + phiId]
+    thicknessDelta[thetaId * nPhiGlobal + phiId] = thicknessOutput[thetaId * pitch + phiId] - eta;
 }
 
 // __global__ void applyforceParticles
