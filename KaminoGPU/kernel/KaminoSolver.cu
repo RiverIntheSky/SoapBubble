@@ -295,7 +295,7 @@ KaminoSolver::~KaminoSolver()
     std::cout << "Percentage of advection : " << advectionTime / totalTimeUsed * 100.0f << "%" << std::endl;
     std::cout << "Percentage of bodyforce : " << bodyforceTime / totalTimeUsed * 100.0f << "%" << std::endl;
     std::cout << "Percentage of CG / bodyforce : " << CGTime / bodyforceTime * 100.0f << "%" << std::endl;
-    std::cout << "Elapsed time" << this->timeElapsed << std::endl;
+    std::cout << "Elapsed time " << this->timeElapsed << std::endl;
 # endif
 }
 

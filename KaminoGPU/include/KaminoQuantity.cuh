@@ -76,6 +76,8 @@ class ScalarQuantity: public KaminoQuantity {
 private:
     /* initial value */
     float* gpuInit;
+    /* accumulated changes */
+    float* gpuDelta;
 public:
     /* Constructor */
     ScalarQuantity(std::string attributeName, size_t nPhi, size_t nTheta,
@@ -84,4 +86,5 @@ public:
     ~ScalarQuantity();
 
     float* getGPUInit();
+    float* getGPUDelta();
 };

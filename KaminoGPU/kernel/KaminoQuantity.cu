@@ -30,7 +30,9 @@ KaminoQuantity::KaminoQuantity(std::string attributeName, size_t nPhi, size_t nT
 ScalarQuantity::ScalarQuantity(std::string attributeName, size_t nPhi, size_t nTheta,
 			       float phiOffset, float thetaOffset)
     : KaminoQuantity(attributeName, nPhi, nTheta, phiOffset, thetaOffset) {
-    checkCudaErrors(cudaMallocPitch(&gpuInit, &nextStepPitch, nPhi * sizeof(float), nTheta));
+    checkCudaErrors(cudaMallocPitch(&gpuInit, &thisStepPitch, nPhi * sizeof(float), nTheta));
+    checkCudaErrors(cudaMallocPitch(&gpuDelta, &thisStepPitch, nPhi * sizeof(float), nTheta));
+    checkCudaErrors(cudaMemset(gpuDelta, 0, thisStepPitch * nTheta));
 }
 
 
@@ -107,6 +109,10 @@ float* KaminoQuantity::getGPUNextStep() {
 
 float* ScalarQuantity::getGPUInit() {
     return this->gpuInit;
+}
+
+float* ScalarQuantity::getGPUDelta() {
+    return this->gpuDelta;
 }
 
 
