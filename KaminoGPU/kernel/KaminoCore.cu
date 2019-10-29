@@ -71,13 +71,13 @@ inline __device__ float dist(float2 Id1, float2 Id2) {
  * usage: maxValKernel<<<gridSize, blockSize>>>(maxVal, vel);
  *        maxValKernel<<<1, blockSize>>>(maxVal, maxVal);
  */
-__global__ void maxValKernel(float* maxVal, float* vel){
+__global__ void maxValKernel(float* maxVal, float* array) {
     __shared__ float maxValTile[MAX_BLOCK_SIZE];
 	
     int tid = threadIdx.x;
     int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-    maxValTile[tid] = fabsf(vel[i]);
+    maxValTile[tid] = fabsf(array[i]);
     __syncthreads();   
     //sequential addressing by reverse loop and thread-id based indexing
     for (int s = blockDim.x / 2; s > 0; s >>= 1) {
@@ -402,14 +402,15 @@ inline __device__ float2 DMC(float* velTheta, float* velPhi, float& dt, float2& 
 
 
 inline __device__ float2 lerpCoords(float2 from, float2 to, float alpha) {
-    from *= gridLenGlobal;
-    to *= gridLenGlobal;
-    float3 from3 = normalize(make_float3(cos(from.y) * sin(from.x),
-					 sin(from.y) * sin(from.x),
-					 cos(from.x)));
-    float3 to3 = normalize(make_float3(cos(to.y) * sin(to.x),
-				       sin(to.y) * sin(to.x),
-				       cos(to.x)));
+    float2 from_ = from * gridLenGlobal;
+    float2 to_ = to * gridLenGlobal;
+
+    float3 from3 = normalize(make_float3(cos(from_.y) * sin(from_.x),
+					 sin(from_.y) * sin(from_.x),
+					 cos(from_.x)));
+    float3 to3 = normalize(make_float3(cos(to_.y) * sin(to_.x),
+				       sin(to_.y) * sin(to_.x),
+				       cos(to_.x)));
     float3 k = normalize(cross(from3, to3));
     if (isnan(k.x))
 	return from;
@@ -1067,6 +1068,28 @@ __global__ void advectionCenteredBimocq
 // }
 
 
+/**
+ * return the maximal absolute value in array with nTheta rows and nPhi cols
+ */
+float KaminoSolver::maxAbs(float* array, size_t nTheta, size_t nPhi) {
+    float *max, result;
+    CHECK_CUDA(cudaMalloc(&max, MAX_BLOCK_SIZE * sizeof(float)));
+    CHECK_CUDA(cudaMemset(max, 0, MAX_BLOCK_SIZE * sizeof(float)));
+
+    dim3 gridLayout;
+    dim3 blockLayout;
+    determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+    maxValKernel<<<gridLayout, blockLayout>>>(max, array);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    maxValKernel<<<1, blockLayout>>>(max, max);
+    CHECK_CUDA(cudaMemcpy(&result, max, sizeof(float),
+     			  cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaFree(max));
+    return result;
+}
+
+
 void KaminoSolver::updateForward(float dt, float* &fwd_t, float* &fwd_p) {
     float T = 0.0;
     float dt_ = dt / radius; // scaled; assume U = 1
@@ -1113,27 +1136,10 @@ void KaminoSolver::updateBackward(float dt, float* &bwd_t, float* &bwd_p) {
 
 
 void KaminoSolver::updateCFL(){
-    float *maxVal;
-    CHECK_CUDA(cudaMalloc(&maxVal, MAX_BLOCK_SIZE * sizeof(float)));
-
-    dim3 gridLayout;
-    dim3 blockLayout;
-    determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getThisStepPitchInElements());
-    maxValKernel<<<gridLayout, blockLayout>>>(maxVal, velTheta->getGPUThisStep());
-    CHECK_CUDA(cudaDeviceSynchronize());
-    maxValKernel<<<1, blockLayout>>>(maxVal, maxVal);
-    CHECK_CUDA(cudaMemcpy(&(this->maxv), maxVal, sizeof(float),
-     			  cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaMemset(maxVal, 0, MAX_BLOCK_SIZE * sizeof(float)));
-
-    determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getThisStepPitchInElements());
-    maxValKernel<<<gridLayout, blockLayout>>>(maxVal, velPhi->getGPUThisStep());
-    CHECK_CUDA(cudaDeviceSynchronize());
-    maxValKernel<<<1, blockLayout>>>(maxVal, maxVal);
-    CHECK_CUDA(cudaMemcpy(&(this->maxu), maxVal, sizeof(float),
-     			  cudaMemcpyDeviceToHost));    
-    CHECK_CUDA(cudaGetLastError());
-    CHECK_CUDA(cudaFree(maxVal));
+    this->maxu = maxAbs(velPhi->getGPUThisStep(), velPhi->getNTheta(),
+			velPhi->getThisStepPitchInElements());
+    this->maxv = maxAbs(velTheta->getGPUThisStep(), velTheta->getNTheta(),
+			velTheta->getThisStepPitchInElements());
 
     this->cfldt = gridLen / std::max(std::max(maxu, maxv), eps);
 }
@@ -1155,15 +1161,12 @@ __global__ void estimateDistortionKernel(float* map1_t, float* map1_p,
     // sample map2 using the entries of map 1
     float2 pos1 = make_float2(at(map1_t, Id), at(map1_p, Id));
     float2 pos2 = sampleMapping(map2_t, map2_p, pos1);
-    //    printf("gId %f %f pos2 %f %f dist %f\n", gId.x, gId.y, pos2.x, pos2.y, dist(gId, pos2));
+
     at(result, Id) = dist(gId, pos2);
 }
 
 
 float KaminoSolver::estimateDistortion() {
-    float *maxVal, dist1, dist2;
-    CHECK_CUDA(cudaMalloc(&maxVal, MAX_BLOCK_SIZE * sizeof(float)));
-    
     dim3 gridLayout;
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
@@ -1177,23 +1180,7 @@ float KaminoSolver::estimateDistortion() {
     CHECK_CUDA(cudaDeviceSynchronize());
     CHECK_CUDA(cudaGetLastError());
 
-    maxValKernel<<<gridLayout, blockLayout>>>(maxVal, tmp_t);
-    CHECK_CUDA(cudaDeviceSynchronize());
-    maxValKernel<<<1, blockLayout>>>(maxVal, maxVal);  
-    CHECK_CUDA(cudaMemcpy(&(dist1), maxVal, sizeof(float),
-     			  cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaMemset(maxVal, 0, MAX_BLOCK_SIZE * sizeof(float)));
-    
-    maxValKernel<<<gridLayout, blockLayout>>>(maxVal, tmp_p);
-    CHECK_CUDA(cudaDeviceSynchronize());
-    maxValKernel<<<1, blockLayout>>>(maxVal, maxVal);
-    CHECK_CUDA(cudaMemcpy(&(dist2), maxVal, sizeof(float),
-     			  cudaMemcpyDeviceToHost));
-
-    CHECK_CUDA(cudaGetLastError());
-    CHECK_CUDA(cudaFree(maxVal));
-
-    return max(dist1, dist2);
+    return max(maxAbs(tmp_t, nTheta, nPhi), maxAbs(tmp_p, nTheta, nPhi));
 }
 
 

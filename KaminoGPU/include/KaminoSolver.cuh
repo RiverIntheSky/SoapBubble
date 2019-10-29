@@ -182,6 +182,7 @@ public:
     void setBroken(bool broken);
 
     /* help functions */
+    float maxAbs(float* array, size_t nTheta, size_t nPhi);
     void write_thickness_img(const std::string& s, const int frame);
     // void write_data_bgeo(const std::string& s, const int frame);
     void write_image(const std::string& s, size_t width, size_t height, std::vector<float> *images);
