@@ -198,6 +198,7 @@ public:
     void updateForward(float dt, float* &fwd_t, float* &fwd_p);
     void updateBackward(float dt, float* &bwd_t, float* &bwd_p);
     float estimateDistortion();
+    void reInitializeMapping();
 
     KaminoParticles* particles;
 };

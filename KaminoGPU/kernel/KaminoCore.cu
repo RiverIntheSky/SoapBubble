@@ -829,6 +829,63 @@ __global__ void advectionCenteredBimocq
 }
 
 
+__global__ void correctBimocq1(float* thicknessCurr, float* thicknessError, float* thicknessDelta,
+			       float* thicknessInit, float* fwd_t, float* fwd_p, size_t pitch) {
+    float w[5] = {0.125f, 0.125f, 0.125f, 0.125f, 0.5f};
+    float2 dir[5] = {make_float2(-0.25f,-0.25f),
+		     make_float2(0.25f, -0.25f),
+		     make_float2(-0.25f, 0.25f),
+		     make_float2( 0.25f, 0.25f),
+		     make_float2(0.f, 0.f)};
+
+    // Index
+    int splitVal = nPhiGlobal / blockDim.x;
+    int threadSequence = blockIdx.x % splitVal;
+    int phiId = threadIdx.x + threadSequence * blockDim.x;
+    int thetaId = blockIdx.x / splitVal;
+
+    float thickness = 0.f;
+
+    // Coord in scalar space
+    float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
+    for (int i = 0; i < 5; i++) {
+	float2 posId = gId + dir[i];
+	float2 initPosId = sampleMapping(fwd_t, fwd_p, posId);
+	thickness += w[i] * sampleCentered(thicknessCurr, initPosId, pitch);
+    }
+    at(thicknessError, thetaId, phiId) = (thickness - at(thicknessDelta, thetaId, phiId, pitch)
+					- at(thicknessInit, thetaId, phiId, pitch)) * 0.5f;
+}
+
+
+__global__ void correctBimocq2(float* thicknessOut, float* thicknessError,
+			       float* bwd_t, float* bwd_p, size_t pitch) {
+    float w[5] = {0.125f, 0.125f, 0.125f, 0.125f, 0.5f};
+    float2 dir[5] = {make_float2(-0.25f,-0.25f),
+		     make_float2(0.25f, -0.25f),
+		     make_float2(-0.25f, 0.25f),
+		     make_float2( 0.25f, 0.25f),
+		     make_float2(0.f, 0.f)};
+
+    // Index
+    int splitVal = nPhiGlobal / blockDim.x;
+    int threadSequence = blockIdx.x % splitVal;
+    int phiId = threadIdx.x + threadSequence * blockDim.x;
+    int thetaId = blockIdx.x / splitVal;
+
+    // if (thetaId < nThetaGlobal/8 || thetaId > nThetaGlobal*7/8)
+    // 	return;
+
+    // Coord in scalar space
+    float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
+    for (int i = 0; i < 5; i++) {
+	float2 posId = gId + dir[i];
+	float2 samplePosId = sampleMapping(bwd_t, bwd_p, posId);
+	at(thicknessOut, thetaId, phiId, pitch) -= w[i] * sampleCentered(thicknessError, samplePosId, nPhiGlobal);
+    }
+}
+
+
 // __global__ void advectionAllCentered
 // (fReal* thicknessOutput, fReal* surfOutput, fReal* thicknessInput, fReal* surfInput, fReal* velPhi, fReal* velTheta, size_t nPitchInElements)
 // {
@@ -1233,6 +1290,19 @@ void KaminoSolver::advection()
 	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), surfConcentration->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
+
+    if (useBimocq) {
+	correctBimocq1<<<gridLayout, blockLayout>>>
+	    (thickness->getGPUNextStep(), tmp_t, thickness->getGPUDelta(), thickness->getGPUInit(),
+	     forward_t, forward_p, pitch);
+	checkCudaErrors(cudaGetLastError());
+	checkCudaErrors(cudaDeviceSynchronize());
+
+	correctBimocq2<<<gridLayout, blockLayout>>>
+	    (thickness->getGPUNextStep(), tmp_t, backward_t, backward_p, pitch);
+	checkCudaErrors(cudaGetLastError());
+	checkCudaErrors(cudaDeviceSynchronize());
+    }
 
     //    checkCudaErrors(cudaDeviceSynchronize());
  

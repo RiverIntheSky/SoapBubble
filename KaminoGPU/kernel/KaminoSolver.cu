@@ -444,10 +444,8 @@ void KaminoSolver::stepForward() {
     timer.startTimer();
 # endif
     updateCFL();
-
     updateForward(this->timeStep, forward_t, forward_p);
     updateBackward(this->timeStep, backward_t, backward_p);
-    std::cout << "max distortion " << estimateDistortion() << std::endl;
 
     advection();
 # ifdef PERFORMANCE_BENCHMARK
@@ -459,6 +457,29 @@ void KaminoSolver::stepForward() {
     this->bodyforceTime += timer.stopTimer() * 0.001f;
 # endif
     this->timeElapsed += this->timeStep;
+
+    float distortion = estimateDistortion();
+    std::cout << "max distortion " << distortion << std::endl;
+    if (distortion > 1.f) {
+	reInitializeMapping();
+    }
+}
+
+
+void KaminoSolver::reInitializeMapping() {
+    CHECK_CUDA(cudaMemcpy(this->thickness->getGPUInit(), this->thickness->getGPUThisStep(),
+			  this->thickness->getThisStepPitchInElements() * this->thickness->getNTheta() *
+			  sizeof(float), cudaMemcpyDeviceToDevice));
+
+    CHECK_CUDA(cudaMemset(this->thickness->getGPUDelta(), 0, pitch * sizeof(float) * nTheta));
+
+    dim3 gridLayout;
+    dim3 blockLayout;
+    determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+    initMapping<<<gridLayout, blockLayout>>>(forward_t, forward_p);
+    initMapping<<<gridLayout, blockLayout>>>(backward_t, backward_p);
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
 }
 
 
