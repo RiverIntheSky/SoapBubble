@@ -1403,8 +1403,7 @@ __global__ void divergenceKernel
 }
 
 
-// compute divergence using eq (16), seems to differ a lot from compute it using velocity
-// directly?
+// compute divergence using gamma
 __global__ void divergenceKernel_fromGamma(float* div, float* gammaNext, float* gammaThis,
 					   size_t pitch) {
     // Index
@@ -1412,51 +1411,17 @@ __global__ void divergenceKernel_fromGamma(float* div, float* gammaNext, float* 
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
-    
-    // fReal thetaCoord = ((fReal)thetaId + centeredThetaOffset) * gridLenGlobal;
-    
-    // fReal halfStep = 0.5 * gridLenGlobal;
-
-    // fReal cscTheta = 1.f / sinf(thetaCoord);
-    // fReal sinThetaSouth = sinf(thetaCoord + halfStep);
-    // fReal sinThetaNorth = sinf(thetaCoord - halfStep);
 
     float gamma_a = gammaThis[thetaId * pitch + phiId];
     fReal gamma = gammaNext[thetaId * pitch + phiId];
-    // fReal gammaWest = gammaNext[thetaId * pitch + (phiId - 1 + nPhiGlobal) % nPhiGlobal];
-    // fReal gammaEast = gammaNext[thetaId * pitch + (phiId + 1) % nPhiGlobal];
-    // fReal gammaNorth = 0.0;
-    // fReal gammaSouth = 0.0;
-    // if (thetaId != 0) {
-    // 	gammaNorth = gammaNext[(thetaId - 1) * pitch + phiId];
-    // } else {
-    // 	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
-    // 	gammaNorth = gammaNext[thetaId * pitch + oppositePhiId];
-    // }
-    // if (thetaId != nThetaGlobal - 1) {
-    // 	gammaSouth = gammaNext[(thetaId + 1) * pitch + phiId];
-    // } else {
-    // 	size_t oppositePhiId = (phiId + nPhiGlobal / 2) % nPhiGlobal;
-    // 	gammaSouth = gammaNext[thetaId * pitch + oppositePhiId];
-    // }
-// # ifdef sphere
-//     fReal laplace = invGridLenGlobal * invGridLenGlobal * cscTheta *
-// 	(sinThetaSouth * (gammaSouth - gamma) - sinThetaNorth * (gamma - gammaNorth) +
-// 		    cscTheta * (gammaEast + gammaWest - 2 * gamma));
-// # else
-//     fReal laplace = invGridLenGlobal * invGridLenGlobal * 
-//     	(gammaWest - 4*gamma + gammaEast + gammaNorth + gammaSouth);
-// #endif
-    
-    div[thetaId * nPhiGlobal + phiId]
-	= (1 - gamma/gamma_a) / timeStepGlobal;
-	//	= (DsGlobal * laplace - (gamma - gamma_a) / timeStepGlobal) / gamma_a;
 
+    div[thetaId * nPhiGlobal + phiId] = (1 - gamma / gamma_a) / timeStepGlobal;
 }
 
 
 __global__ void concentrationLinearSystemKernel
-(float* div_a, float* gamma_a, float* eta_a, float* val, float* rhs, size_t pitch) {
+(float* velPhi_a, float* velTheta_a, float* gamma_a, float* eta_a,
+ float* val, float* rhs, size_t pitch) {
     // TODO: pre-compute eta???
     int splitVal = nPhiGlobal / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
@@ -1465,10 +1430,9 @@ __global__ void concentrationLinearSystemKernel
     int idx = thetaId * nPhiGlobal + phiId;
     int idx5 = 5 * idx;
 
-    float gamma = gamma_a[thetaId * pitch + phiId];
-    float div = div_a[idx];
+    float gamma = at(gamma_a, thetaId, phiId, pitch);
+    float invDt = 1.f / timeStepGlobal;
 
-# ifdef sphere
     fReal gTheta = ((float)thetaId + centeredThetaOffset) * gridLenGlobal;
     fReal gPhi = ((float)phiId + centeredPhiOffset) * gridLenGlobal;
     fReal halfStep = 0.5 * gridLenGlobal;
@@ -1477,97 +1441,96 @@ __global__ void concentrationLinearSystemKernel
     fReal sinTheta = sinf(gTheta);
     fReal cscTheta = 1. / sinTheta;
     fReal cosTheta = cosf(gTheta);
-# endif
 
-    // neighboring eta values
-    fReal eta = eta_a[thetaId * pitch + phiId];
-    fReal etaWest = eta_a[thetaId * pitch + (phiId - 1 + nPhiGlobal) % nPhiGlobal];
-    fReal etaEast = eta_a[thetaId * pitch + (phiId + 1) % nPhiGlobal];
+    // neighboring values
+    int phiIdEast = (phiId + 1) % nPhiGlobal;
+    int phiIdWest = (phiId - 1 + nPhiGlobal) % nPhiGlobal;
+    fReal eta = at(eta_a, thetaId, phiId, pitch);
+    fReal etaWest = at(eta_a, thetaId, phiIdWest, pitch);
+    fReal etaEast = at(eta_a, thetaId, phiIdEast, pitch);
     fReal etaNorth = 0.0;
     fReal etaSouth = 0.0;
+    fReal uEast = 0.0;
+    fReal uWest = 0.0;
+    fReal vNorth = 0.0;
+    fReal vSouth = 0.0;
+
+    uWest = at(velPhi_a, thetaId, phiId, pitch);
+    uEast = at(velPhi_a, thetaId, phiIdEast, pitch);
+
     if (thetaId != 0) {
-    	etaNorth = eta_a[(thetaId - 1) * pitch + phiId];
+	size_t thetaNorthIdx = thetaId - 1;
+	vNorth = at(velTheta_a, thetaNorthIdx, phiId, pitch);
+    	etaNorth = at(eta_a, thetaNorthIdx, phiId, pitch);
     } else {
     	int oppositePhiId = (phiId + nThetaGlobal) % nPhiGlobal;
     	etaNorth = eta_a[oppositePhiId];
     }
     if (thetaId != nThetaGlobal - 1) {
-    	etaSouth = eta_a[(thetaId + 1) * pitch + phiId];
+	vSouth = at(velTheta_a, thetaId, phiId, pitch);
+    	etaSouth = at(eta_a, thetaId + 1, phiId, pitch);
     } else {
     	int oppositePhiId = (phiId + nThetaGlobal) % nPhiGlobal;
-    	etaSouth = eta_a[thetaId * pitch + oppositePhiId];
+    	etaSouth = at(eta_a, thetaId, oppositePhiId, pitch);
     }
+    // at both poles sin(theta) = 0;
 
     // constant for this grid
-    float oDtCre = 1./timeStepGlobal + CrGlobal/eta; // \frac{1}{\Delta t} + Cr/eta
+    float CrDt = CrGlobal * timeStepGlobal; // Cr\Delta t
     float MDt = MGlobal * timeStepGlobal; // M\Delta t
-    /* Ds is zero */
-    // float oCrDteDs = (1 + CrGlobal * timeStepGlobal / eta) * DsGlobal; // (1+Cr\eta\Delta t)D_s
     float s2 = invGridLenGlobal * invGridLenGlobal; // \Delta s^2
-
-    rhs[idx] = oDtCre - div;
-    float diva = 0.f;
-# ifdef sphere
-# ifdef uair
-    diva += 20.f * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * (M_hPI - gTheta)
-	* expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal
-	* sinf(gPhi) * cscTheta / UGlobal;
-# endif
-# ifdef vair
-    diva += (gTheta < M_hPI) * 4 * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * cosTheta
-	* cosf(2 * gPhi) * radiusGlobal / UGlobal;
-# endif
-# ifdef gravity
-    rhs[idx] -= 2 * gGlobal * cosTheta * timeStepGlobal;
-# endif
-# endif
-    rhs[idx] -= CrGlobal * timeStepGlobal / eta * diva;
-# ifdef sphere
-    rhs[idx] *= sinTheta;
-# endif
 	
     // up
-    float etaxyminus_ = 2. / (etaNorth + eta);
-# ifdef sphere
-    val[idx5] = -s2 * sinThetaNorth * MDt * etaxyminus_;
-# else
-    val[idx5] = -s2 * MDt * etaxyminus_;
-# endif
+    float etaUp = (etaNorth + eta) / 2.f;
+    val[idx5] = -s2 * sinThetaNorth * MDt / (etaUp + CrDt);
 
     // left
-    float etaxminusy_ = 2. / (etaWest + eta);
-# ifdef sphere
-    val[idx5 + 1] = -s2 * cscTheta * MDt * etaxminusy_;
-# else
-    val[idx5 + 1] = -s2 * MDt * etaxminusy_;
-# endif  
+    float etaLeft = (etaWest + eta) / 2.f;
+    val[idx5 + 1] = -s2 * cscTheta * MDt / (etaLeft + CrDt);
 
     // right
-    float etaxplusy_ = 2. / (etaEast + eta);
-# ifdef sphere
-    val[idx5 + 3] = -s2 * cscTheta * MDt * etaxplusy_;
-# else
-    val[idx5 + 3] = -s2 * MDt * etaxplusy_;
-# endif  
+    float etaRight = (etaEast + eta) / 2.f;
+    val[idx5 + 3] = -s2 * cscTheta * MDt / (etaRight + CrDt);
     
     // down
-    float etaxyplus_ = 2. / (etaSouth + eta);
-# ifdef sphere
-    val[idx5 + 4] = -s2 * sinThetaSouth * MDt * etaxyplus_;
-# else
-    val[idx5 + 4] = -s2 * MDt * etaxyplus_;
-# endif  
+    float etaDown = (etaSouth + eta) / 2.f;
+    val[idx5 + 4] = -s2 * sinThetaSouth * MDt / (etaDown + CrDt);
 
     // center
-# ifdef sphere
-    val[idx5 + 2] = oDtCre / gamma * sinTheta + MDt * s2 *
-	(cscTheta * (etaxplusy_ + etaxminusy_)
-	 + sinThetaNorth * etaxyminus_
-	 + sinThetaSouth * etaxyplus_);
-# else
-    val[idx5 + 2] = oDtCre / gamma + s2 * MDt * 
-	(etaxyminus_ + etaxminusy_ + etaxplusy_ + etaxyplus_);
+    val[idx5 + 2] = sinTheta / (gamma * timeStepGlobal)
+	- (val[idx5] + val[idx5 + 1] + val[idx5 + 3] + val[idx5 + 4]);
+
+    // rhs
+    float div = invGridLenGlobal *
+	(uEast / (1.f + CrGlobal * timeStepGlobal / etaRight) -
+	 uWest / (1.f + CrGlobal * timeStepGlobal / etaLeft) +
+	 cscTheta * (vSouth * sinThetaSouth / (1.f + CrGlobal * timeStepGlobal / etaDown) -
+		     vNorth * sinThetaNorth / (1.f + CrGlobal * timeStepGlobal / etaUp)));
+
+    // # ifdef uair
+    //     diva += 20.f * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * (M_hPI - gTheta)
+    // 	* expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal
+    // 	* sinf(gPhi) * cscTheta / UGlobal;
+    // # endif
+    // # ifdef vair
+    //     diva += (gTheta < M_hPI) * 4 * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * cosTheta
+    // 	* cosf(2 * gPhi) * radiusGlobal / UGlobal;
+    // # endif
+    
+# ifdef gravity
+    // div += gGlobal * cscTheta * invGridLenGlobal *
+    // 	(sinThetaSouth * sinThetaSouth / (invDt + CrGlobal / etaDown) -
+    // 	 sinThetaNorth * sinThetaNorth / (invDt + CrGlobal / etaUp));
+    div += 0.57735026919 * gGlobal * cscTheta * invGridLenGlobal *
+    	((cosf(gPhi + halfStep) - sinf(gPhi + halfStep)) / (invDt + CrGlobal / etaRight) -
+    	 (cosf(gPhi - halfStep) - sinf(gPhi - halfStep)) / (invDt + CrGlobal / etaLeft) +
+    	 (cosf(gTheta + halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaSouth)
+    	 / (invDt + CrGlobal / etaDown) * sinThetaSouth -
+    	 (cosf(gTheta - halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaNorth)
+    	 / (invDt + CrGlobal / etaUp) * sinThetaNorth);
 # endif
+
+    rhs[idx] = sinTheta * (invDt - div);
 }
 
 
@@ -1705,12 +1668,13 @@ __global__ void applyforcevelthetaKernel(fReal* velThetaOutput, fReal* velThetaI
     float f3 = 0.f;
 # ifdef gravity
 # ifdef sphere
-    f3 = gGlobal * sinf(gTheta);
+    // f3 = gGlobal * sinf(gTheta);
+    f3 = 0.57735026919 * (cosf(gTheta)*(cosf(gPhi) + sinf(gPhi))+sinf(gTheta)) * gGlobal;
 # else
     f3 = gGlobal;
 # endif
 # endif
-        
+
     velThetaOutput[thetaId * pitch + phiId] = (v1 / timeStepGlobal + f1 + f2 + f3) / (1./timeStepGlobal + CrGlobal * invDelta);
 }
 
@@ -1758,8 +1722,10 @@ __global__ void applyforcevelphiKernel
 	* cosf(gPhi) / UGlobal;
 # endif
     float f2 = CrGlobal * invDelta * uAir;
+
+    float f3 = 0.57735026919 * (cosf(gPhi) - sinf(gPhi)) * gGlobal;
         
-    velPhiOutput[thetaId * pitch + phiId] = (u1 / timeStepGlobal + f1 + f2) / (1./timeStepGlobal + CrGlobal * invDelta) / sinTheta;   
+    velPhiOutput[thetaId * pitch + phiId] = (u1 / timeStepGlobal + f1 + f2 + f3) / (1./timeStepGlobal + CrGlobal * invDelta) / sinTheta;   
 }
 
 
@@ -2238,16 +2204,10 @@ void KaminoSolver::bodyforce() {
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
     
-    // div(u^n)
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
-    divergenceKernel<<<gridLayout, blockLayout>>>
-	(div, velPhi->getGPUThisStep(), velTheta->getGPUThisStep(),
-	 velPhi->getThisStepPitchInElements(), velTheta->getThisStepPitchInElements());
-    checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
-
     concentrationLinearSystemKernel<<<gridLayout, blockLayout>>>
-    	(div, surfConcentration->getGPUThisStep(), thickness->getGPUThisStep(), val, rhs, thickness->getThisStepPitchInElements());
+    	(velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), surfConcentration->getGPUThisStep(),
+	 thickness->getGPUThisStep(), val, rhs, thickness->getThisStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
@@ -2273,13 +2233,12 @@ void KaminoSolver::bodyforce() {
     checkCudaErrors(cudaDeviceSynchronize());
 
     // div(u^{n+1})
+    // determineLayout(gridLayout, blockLayout, nTheta, nPhi);
     // divergenceKernel<<<gridLayout, blockLayout>>>
     // 	(div, velPhi->getGPUNextStep(), velTheta->getGPUNextStep(),
     // 	 velPhi->getNextStepPitchInElements(), velTheta->getNextStepPitchInElements());
     // checkCudaErrors(cudaGetLastError());
     // checkCudaErrors(cudaDeviceSynchronize());
-
-    // printGPUarraytoMATLAB<float>("test/div.txt", div, nTheta, nPhi, nPhi);
 
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
     divergenceKernel_fromGamma<<<gridLayout, blockLayout>>>
