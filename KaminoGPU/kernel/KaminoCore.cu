@@ -62,7 +62,7 @@ inline __device__ float dist(float2 Id1, float2 Id2) {
     float3 Id23 = normalize(make_float3(cos(Id2.y) * sin(Id2.x),
 					sin(Id2.y) * sin(Id2.x),
 					cos(Id2.x)));
-    return invGridLenGlobal * acosf(clamp(dot(Id13, Id23), -1.0, 1.0));
+    return invGridLenGlobal * acosf(clamp(dot(Id13, Id23), -1.f, 1.f));
 }
     
 
@@ -119,6 +119,16 @@ __device__ bool validateCoord(float2& Id) {
 	printf("Warning: step size too large! theta = %f\n", Id.x);
     Id.y = fmod(Id.y + nPhiGlobal, (float)nPhiGlobal);
     return ret;
+}
+
+
+__device__ void validateId(int2& Id) {
+    Id.x = Id.x % nPhiGlobal;
+    if (Id.x >= nThetaGlobal) {
+	Id.x = nPhiGlobal - 1 - Id.x;
+	Id.y += nThetaGlobal;
+    }
+    Id.y = Id.y % nPhiGlobal;
 }
 
 
@@ -858,7 +868,8 @@ __global__ void correctBimocq1(float* thicknessCurr, float* thicknessError, floa
 }
 
 
-__global__ void correctBimocq2(float* thicknessOut, float* thicknessError,
+__global__ void correctBimocq2(float* thicknessOutput, float* thicknessInput,
+			       float* thicknessError,
 			       float* bwd_t, float* bwd_p, size_t pitch) {
     float w[5] = {0.125f, 0.125f, 0.125f, 0.125f, 0.5f};
     float2 dir[5] = {make_float2(-0.25f,-0.25f),
@@ -873,16 +884,30 @@ __global__ void correctBimocq2(float* thicknessOut, float* thicknessError,
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
 
-    // if (thetaId < nThetaGlobal/8 || thetaId > nThetaGlobal*7/8)
-    // 	return;
-
     // Coord in scalar space
     float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
+
+    // sample
     for (int i = 0; i < 5; i++) {
 	float2 posId = gId + dir[i];
-	float2 samplePosId = sampleMapping(bwd_t, bwd_p, posId);
-	at(thicknessOut, thetaId, phiId, pitch) -= w[i] * sampleCentered(thicknessError, samplePosId, nPhiGlobal);
+	float2 sampleId = sampleMapping(bwd_t, bwd_p, posId);
+	at(thicknessInput, thetaId, phiId, pitch) -= w[i] * sampleCentered(thicknessError, sampleId, nPhiGlobal);
     }
+
+    // clamp local extrema
+    int range[] = {-1, 0, 1};
+    float minVal = at(thicknessOutput, thetaId, phiId, pitch);
+    float maxVal = 0.f;
+    for (int t : range) {
+	for (int p : range) {
+	    int2 sampleId = make_int2(thetaId + t, phiId + p);
+	    validateId(sampleId);
+	    float currentVal = at(thicknessOutput, sampleId, pitch);
+	    minVal = fminf(minVal, currentVal);
+	    maxVal = fmaxf(maxVal, currentVal);
+	}
+    }
+    at(thicknessOutput, thetaId, phiId, pitch) = clamp(at(thicknessInput, thetaId, phiId, pitch), minVal, maxVal);
 }
 
 
@@ -1276,7 +1301,7 @@ void KaminoSolver::advection()
     determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
     if (useBimocq) {
 	advectionCenteredBimocq<<<gridLayout, blockLayout>>>
-	    (thickness->getGPUNextStep(), thickness->getGPUInit(), thickness->getGPUDelta(),
+	    (thickness->getGPUThisStep(), thickness->getGPUInit(), thickness->getGPUDelta(),
 	     backward_t, backward_p, pitch);
     } else {
 	advectionCentered<<<gridLayout, blockLayout>>>
@@ -1291,17 +1316,23 @@ void KaminoSolver::advection()
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
+    // error correction
     if (useBimocq) {
-	correctBimocq1<<<gridLayout, blockLayout>>>
-	    (thickness->getGPUNextStep(), tmp_t, thickness->getGPUDelta(), thickness->getGPUInit(),
-	     forward_t, forward_p, pitch);
-	checkCudaErrors(cudaGetLastError());
-	checkCudaErrors(cudaDeviceSynchronize());
+    	correctBimocq1<<<gridLayout, blockLayout>>>
+    	    (thickness->getGPUThisStep(), tmp_t, thickness->getGPUDelta(), thickness->getGPUInit(),
+    	     forward_t, forward_p, pitch);
+    	checkCudaErrors(cudaGetLastError());
+    	checkCudaErrors(cudaDeviceSynchronize());
+
+    	CHECK_CUDA(cudaMemcpy(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
+    			      thickness->getNTheta() * pitch * sizeof(float),
+    			      cudaMemcpyDeviceToDevice));
 
 	correctBimocq2<<<gridLayout, blockLayout>>>
-	    (thickness->getGPUNextStep(), tmp_t, backward_t, backward_p, pitch);
-	checkCudaErrors(cudaGetLastError());
-	checkCudaErrors(cudaDeviceSynchronize());
+    	    (thickness->getGPUNextStep(), thickness->getGPUThisStep(),
+    	     tmp_t, backward_t, backward_p, pitch);
+    	checkCudaErrors(cudaGetLastError());
+    	checkCudaErrors(cudaDeviceSynchronize());
     }
 
     //    checkCudaErrors(cudaDeviceSynchronize());
