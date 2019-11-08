@@ -21,7 +21,6 @@ set(CMAKE_CXX_COMPILER  /usr/bin/c++)
 set(CMAKE_CXX_FLAGS "-std=c++0x")
 
 find_package(CUDA REQUIRED)
-# find_package(CUDA REQUIRED)
 include_directories(${CUDA_TOOLKIT_INCLUDE})
 link_directories(/opt/cuda/lib64)
 set(CUDA_HOST_COMPILER  /usr/bin/cc)
@@ -33,6 +32,9 @@ message("arch=61")
 find_package(Boost COMPONENTS filesystem REQUIRED)
 include_directories(${Boost_INCLUDE_DIR})
 link_directories(${Boost_LIBRARY_DIR})
+
+find_package(Ceres REQUIRED)
+include_directories(${CERES_INCLUDE_DIRS})
 
 option(BUILD_TESTS "Build the tests" ON)
 if(BUILD_TESTS)
@@ -50,6 +52,7 @@ cuda_add_executable(kamino
   ./kernel/tdm.cu
   ./kernel/vectorUtil.cu
   )
+
 target_link_libraries(kamino
   opencv_core
   opencv_highgui
@@ -63,4 +66,5 @@ target_link_libraries(kamino
   cufft
   amgxsh
   ${Boost_LIBRARIES}
+  ${CERES_LIBRARIES}
   )

@@ -8,9 +8,10 @@
 extern __constant__ float invGridLenGlobal;
 
 __device__ float kaminoLerp(float from, float to, float alpha);
-// __device__ float sampleCentered(float* input, float phiRawId, float thetaRawId, size_t pitch);
+__device__ float sampleCentered(float* input, float2& rawId, size_t pitch);
 __global__ void resetThickness(float2* weight);
 __global__ void initLinearSystem(int* row_ptr, int* col_ind);
+__global__ void initMapping(float* map_theta, float* map_phi);
 
 class KaminoSolver
 {
@@ -18,7 +19,8 @@ private:
     // Handle for batched FFT
     cufftHandle kaminoPlan;
 
-    // KaminoParticles* particles;
+    KaminoParticles* particles;
+    size_t particleDensity;
 
     // Buffer for U, the fouriered coefs
     // This pointer's for the pooled global memory (nTheta by nPhi)
@@ -165,12 +167,12 @@ private:
 			 size_t nRow_theta, size_t nCol_phi);
 public:
     KaminoSolver(size_t nPhi, size_t nTheta, float radius, float frameDuration,
-		 float H, int device, std::string AMGconfig);
+		 float H, int device, std::string AMGconfig, size_t particleDensity);
     ~KaminoSolver();
 
     void initWithConst(KaminoQuantity* attrib, float val);
     void initWithConst(ScalarQuantity* attrib, float val);
-    void initThicknessfromPic(std::string path, size_t particleDensity);
+    void initThicknessfromPic(std::string path);
     void initParticlesfromPic(std::string path, size_t parPergrid);
 
     void copyToCPU(KaminoQuantity* quantity, float* cpubuffer);
@@ -178,6 +180,7 @@ public:
     void adjustStepSize(float& timeStep, const float& U, const float& eps);
     void stepForward(float timeStep);
     void stepForward();
+    float getGridLen();
     bool isBroken();
     void setBroken(bool broken);
 
@@ -199,8 +202,10 @@ public:
     void updateBackward(float dt, float* &bwd_t, float* &bwd_p);
     float estimateDistortion();
     void reInitializeMapping();
+    void correctMapping();
+    bool validateCoord(double2& Id);
 
-    KaminoParticles* particles;
+    int count = 0;
 };
 
 
