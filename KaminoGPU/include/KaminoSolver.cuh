@@ -137,10 +137,7 @@ private:
     /* Bimocq mapping buffers */
     float *forward_p, *forward_t,
 	*backward_p, *backward_t,
-	*forward_scalar_t, *forward_scalar_p,
-	*backward_scalar_p, *backward_scalar_t,
 	*backward_pprev, *backward_tprev,
-	*backward_scalar_pprev, *backward_scalar_tprev,
 	*tmp_p, *tmp_t;
     void updateCFL();
 

@@ -20,6 +20,7 @@ static __constant__ float gGlobal;
 static __constant__ float DsGlobal;
 static __constant__ float CrGlobal;
 static __constant__ float UGlobal;
+static __constant__ float blend_coeff;
 
 
 # define eps 1e-5f
@@ -877,7 +878,8 @@ __global__ void advectionParticles(float* output, float* velPhi, float* velTheta
 
 __global__ void advectionCenteredBimocq
 (float* thicknessOutput, float* thicknessInput, float* thicknessInit, float* thicknessDelta,
- float* velTheta, float* velPhi, float* bwd_t, float* bwd_p, size_t pitch) {
+ float* thicknessInitLast, float* thicknessDeltaLast, float* velTheta, float* velPhi,
+ float* bwd_t, float* bwd_p, float* bwd_tprev, float* bwd_pprev, size_t pitch) {
     float w[5] = {0.125f, 0.125f, 0.125f, 0.125f, 0.5f};
     float2 dir[5] = {make_float2(-0.25f,-0.25f),
 		     make_float2(0.25f, -0.25f),
@@ -904,8 +906,12 @@ __global__ void advectionCenteredBimocq
 	for (int i = 0; i < 5; i++) {
 	    float2 posId = gId + dir[i];
 	    float2 initPosId = sampleMapping(bwd_t, bwd_p, posId);
-	    thickness += w[i] * (sampleCentered(thicknessInit, initPosId, pitch) +
-				 sampleCentered(thicknessDelta, initPosId, pitch));
+	    float2 lastPosId = sampleMapping(bwd_tprev, bwd_pprev, initPosId);
+	    thickness += (1.f - blend_coeff) * w[i] * (sampleCentered(thicknessInitLast, lastPosId, pitch) +
+						       sampleCentered(thicknessDelta, initPosId, pitch) +
+						       sampleCentered(thicknessDeltaLast, lastPosId, pitch)); 
+	    thickness += blend_coeff * w[i] * (sampleCentered(thicknessInit, initPosId, pitch) +
+					       sampleCentered(thicknessDelta, initPosId, pitch));
 	    // gamma += w[i] * (sampleCentered(gammaInit, initPosId, pitch) +
 	    //	 sampleCentered(gammaDelta, initPosId, pitch));
 	}
@@ -934,9 +940,8 @@ __global__ void advectionVThetaBimocq
     // Coord in velTheta space
     float2 gId = make_float2((float)thetaId, (float)phiId) + vThetaOffset;
 
-    //  if (thetaId < float(nThetaGlobal) / 16.f || thetaId > float(nThetaGlobal) * 15.f / 16.f) {
-    if (true) {
-    	float2 traceId = traceRK3(velThetaInput, velPhi, timeStepGlobal, gId, pitch);
+    if (thetaId < float(nThetaGlobal) / 16.f || thetaId > float(nThetaGlobal) * 15.f / 16.f) {
+	float2 traceId = traceRK3(velThetaInput, velPhi, timeStepGlobal, gId, pitch);
     	at(velThetaOutput, thetaId, phiId, pitch) = sampleVTheta(velThetaInput, traceId, pitch);
     } else {
 	float v = 0.f;
@@ -1162,8 +1167,9 @@ void KaminoSolver::advection()
 	if (useBimocq) {
 	    advectionCenteredBimocq<<<gridLayout, blockLayout>>>
 		(thickness->getGPUNextStep(), thickness->getGPUThisStep(), thickness->getGPUInit(),
-		 thickness->getGPUDelta(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
-		 backward_t, backward_p, pitch);
+		 thickness->getGPUDelta(), thickness->getGPUInitLast(),
+		 thickness->getGPUDeltaLast(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
+		 backward_t, backward_p, backward_tprev, backward_pprev, pitch);
 	    checkCudaErrors(cudaGetLastError());
  
 	    advectionCentered<<<gridLayout, blockLayout>>>
@@ -2616,18 +2622,18 @@ void KaminoSolver::reInitializeMapping() {
     determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
 	
     correctThickness1<<<gridLayout, blockLayout>>>
-	(thickness->getGPUThisStep(), tmp_t, thickness->getGPUDelta(), thickness->getGPUInit(),
-	 forward_t, forward_p, pitch);
+    	(thickness->getGPUThisStep(), tmp_t, thickness->getGPUDelta(), thickness->getGPUInit(),
+    	 forward_t, forward_p, pitch);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
     CHECK_CUDA(cudaMemcpy(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
-			  thickness->getNTheta() * pitch * sizeof(float),
-			  cudaMemcpyDeviceToDevice));
+    			  thickness->getNTheta() * pitch * sizeof(float),
+    			  cudaMemcpyDeviceToDevice));
       
     correctThickness2<<<gridLayout, blockLayout>>>
-	(thickness->getGPUNextStep(), thickness->getGPUThisStep(), tmp_t,
-	 backward_t, backward_p, pitch);
+    	(thickness->getGPUNextStep(), thickness->getGPUThisStep(), tmp_t,
+    	 backward_t, backward_p, pitch);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
@@ -2667,7 +2673,12 @@ void KaminoSolver::reInitializeMapping() {
     // checkCudaErrors(cudaDeviceSynchronize());
     
     //swapVelocityBuffers();
-    thickness->swapGPUBuffer();
+    // thickness->swapGPUBuffer();
+
+    std::swap(this->thickness->getGPUInitLast(), this->thickness->getGPUInit());
+    std::swap(this->thickness->getGPUDeltaLast(), this->thickness->getGPUDelta());
+    std::swap(backward_tprev, backward_t);
+    std::swap(backward_pprev, backward_p);
 
     CHECK_CUDA(cudaMemcpy(this->thickness->getGPUInit(), this->thickness->getGPUThisStep(),
 			  this->thickness->getThisStepPitchInElements() * this->thickness->getNTheta() *
@@ -3037,7 +3048,7 @@ Kamino::Kamino(float radius, float H, float U, float c_m, float Gamma_m,
 	       float dt, float DT, int frames,
 	       std::string outputDir, std::string thicknessImage,
 	       size_t particleDensity, int device,
-	       std::string AMGconfig):
+	       std::string AMGconfig, float blendCoeff):
     radius(radius), invRadius(1/radius), H(H), U(1.0), c_m(c_m), Gamma_m(Gamma_m), T(T),
     Ds(Ds/(U*radius)), gs(g*radius/(U*U)), rm(rm), epsilon(H/radius), sigma_r(R*T), M(Gamma_m*sigma_r/(3*rho*H*U*U)),
     S(sigma_a*epsilon/(2*mu*U)), re(mu/(U*radius*rho)), Cr(rhoa*sqrt(nua*radius/U)/(rho*H)),
@@ -3045,7 +3056,7 @@ Kamino::Kamino(float radius, float H, float U, float c_m, float Gamma_m,
     gridLen(M_PI / nTheta), invGridLen(nTheta / M_PI), 
     dt(dt*U/radius), DT(DT), frames(frames), outputDir(outputDir),
     thicknessImage(thicknessImage), particleDensity(particleDensity), device(device),
-    AMGconfig(AMGconfig) 
+    AMGconfig(AMGconfig), blendCoeff(blendCoeff)
 {
     boost::filesystem::create_directories(outputDir);
     if (outputDir.back() != '/')
@@ -3077,6 +3088,7 @@ void Kamino::run()
     checkCudaErrors(cudaMemcpyToSymbol(DsGlobal, &(this->Ds), sizeof(float)));
     checkCudaErrors(cudaMemcpyToSymbol(CrGlobal, &(this->Cr), sizeof(float)));
     checkCudaErrors(cudaMemcpyToSymbol(UGlobal, &(this->U), sizeof(float)));
+    checkCudaErrors(cudaMemcpyToSymbol(blend_coeff, &(this->blendCoeff), sizeof(float)));
 
     solver.initThicknessfromPic(thicknessImage);
 

@@ -79,6 +79,7 @@ private:
     float particleDensity;	// how many particles in a grid cell
     int device;			// which gpu device to use
     std::string AMGconfig;	// AMGX config file
+    float blendCoeff;
 
 public:
     Kamino(float radius = 0.05, float H = 0.0000005, float U = 1.0, float c_m = 0.5,
@@ -87,7 +88,7 @@ public:
 	   float DT = 1.0 / 24.0, int frames = 1000,
 	   std::string outputDir = "../output/test/",
 	   std::string thicknessImage = "", size_t particleDensity = 8, int device = 0,
-	   std::string AMGconfig = "");
+	   std::string AMGconfig = "", float blendCoeff = 0.5f);
     ~Kamino();
 
     /* run the solver */

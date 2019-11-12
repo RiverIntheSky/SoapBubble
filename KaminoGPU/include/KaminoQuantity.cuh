@@ -78,6 +78,10 @@ private:
     float* gpuInit;
     /* accumulated changes */
     float* gpuDelta;
+    /* last value before reinitialization */
+    float* gpuInitLast;
+    /* last accumulated changes */
+    float* gpuDeltaLast;
 public:
     /* Constructor */
     BimocqQuantity(std::string attributeName, size_t nPhi, size_t nTheta,
@@ -85,6 +89,8 @@ public:
     /* Destructor */
     ~BimocqQuantity();
 
-    float* getGPUInit();
-    float* getGPUDelta();
+    float*& getGPUInit();
+    float*& getGPUDelta();
+    float*& getGPUInitLast();
+    float*& getGPUDeltaLast();
 };

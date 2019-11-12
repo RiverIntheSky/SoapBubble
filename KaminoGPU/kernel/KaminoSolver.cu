@@ -188,16 +188,8 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
     CHECK_CUDA(cudaMalloc(&forward_t, N * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&backward_p, N * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&backward_t, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&forward_scalar_p, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&forward_scalar_t, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&backward_scalar_p, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&backward_scalar_t, N * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&backward_pprev, N * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&backward_tprev, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&backward_scalar_pprev, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&backward_scalar_tprev, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&backward_scalar_pprev, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&backward_scalar_tprev, N * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&tmp_p, N * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&tmp_t, N * sizeof(float)));
     
@@ -208,23 +200,11 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
 
     CHECK_CUDA(cudaMemcpy(backward_p, forward_p, N * sizeof(float),
 			  cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(forward_scalar_p, forward_p, N * sizeof(float),
-			  cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(backward_scalar_p, forward_p, N * sizeof(float),
-			  cudaMemcpyDeviceToDevice));
     CHECK_CUDA(cudaMemcpy(backward_pprev, forward_p, N * sizeof(float),
-			  cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(backward_scalar_pprev, forward_p, N * sizeof(float),
 			  cudaMemcpyDeviceToDevice));
     CHECK_CUDA(cudaMemcpy(backward_t, forward_t, N * sizeof(float),
 			  cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(forward_scalar_t, forward_t, N * sizeof(float),
-			  cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(backward_scalar_t, forward_t, N * sizeof(float),
-			  cudaMemcpyDeviceToDevice));
     CHECK_CUDA(cudaMemcpy(backward_tprev, forward_t, N * sizeof(float),
-			  cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(backward_scalar_tprev, forward_t, N * sizeof(float),
 			  cudaMemcpyDeviceToDevice));
 }
 
@@ -273,14 +253,8 @@ KaminoSolver::~KaminoSolver()
     CHECK_CUDA(cudaFree(forward_t));
     CHECK_CUDA(cudaFree(backward_p));
     CHECK_CUDA(cudaFree(backward_t));
-    CHECK_CUDA(cudaFree(forward_scalar_p));
-    CHECK_CUDA(cudaFree(forward_scalar_t));
-    CHECK_CUDA(cudaFree(backward_scalar_p));
-    CHECK_CUDA(cudaFree(backward_scalar_t));
     CHECK_CUDA(cudaFree(backward_pprev));
     CHECK_CUDA(cudaFree(backward_tprev));
-    CHECK_CUDA(cudaFree(backward_scalar_pprev));
-    CHECK_CUDA(cudaFree(backward_scalar_tprev));
     CHECK_CUDA(cudaFree(tmp_p));
     CHECK_CUDA(cudaFree(tmp_t));
     
@@ -504,6 +478,9 @@ void KaminoSolver::initWithConst(BimocqQuantity* attrib, float val)
     CHECK_CUDA(cudaMemcpy(attrib->getGPUInit(), attrib->getGPUThisStep(),
 			  pitch * attrib->getNTheta() *
 			  sizeof(float), cudaMemcpyDeviceToDevice));
+    CHECK_CUDA(cudaMemcpy(attrib->getGPUInitLast(), attrib->getGPUThisStep(),
+			  pitch * attrib->getNTheta() *
+			  sizeof(float), cudaMemcpyDeviceToDevice));
 }
 
 
@@ -547,6 +524,10 @@ void KaminoSolver::initThicknessfromPic(std::string path)
     }
 
     CHECK_CUDA(cudaMemcpy(this->thickness->getGPUInit(), this->thickness->getGPUThisStep(),
+			  this->thickness->getThisStepPitchInElements() * this->thickness->getNTheta() *
+			  sizeof(float), cudaMemcpyDeviceToDevice));
+
+    CHECK_CUDA(cudaMemcpy(this->thickness->getGPUInitLast(), this->thickness->getGPUThisStep(),
 			  this->thickness->getThisStepPitchInElements() * this->thickness->getNTheta() *
 			  sizeof(float), cudaMemcpyDeviceToDevice));
 

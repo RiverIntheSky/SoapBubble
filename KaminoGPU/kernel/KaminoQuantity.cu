@@ -34,8 +34,12 @@ BimocqQuantity::BimocqQuantity(std::string attributeName, size_t nPhi, size_t nT
     : KaminoQuantity(attributeName, nPhi, nTheta, phiOffset, thetaOffset) {
     checkCudaErrors(cudaMallocPitch(&gpuInit, &thisStepPitch, nPhi * sizeof(float), nTheta));
     checkCudaErrors(cudaMallocPitch(&gpuDelta, &thisStepPitch, nPhi * sizeof(float), nTheta));
+    checkCudaErrors(cudaMallocPitch(&gpuInitLast, &thisStepPitch, nPhi * sizeof(float), nTheta));
+    checkCudaErrors(cudaMallocPitch(&gpuDeltaLast, &thisStepPitch, nPhi * sizeof(float), nTheta));
     checkCudaErrors(cudaMemset(gpuInit, 0, thisStepPitch * nTheta));
     checkCudaErrors(cudaMemset(gpuDelta, 0, thisStepPitch * nTheta));
+    checkCudaErrors(cudaMemset(gpuInitLast, 0, thisStepPitch * nTheta));
+    checkCudaErrors(cudaMemset(gpuDeltaLast, 0, thisStepPitch * nTheta));
 }
 
 
@@ -50,6 +54,8 @@ KaminoQuantity::~KaminoQuantity() {
 BimocqQuantity::~BimocqQuantity() {
     checkCudaErrors(cudaFree(gpuInit));
     checkCudaErrors(cudaFree(gpuDelta));
+    checkCudaErrors(cudaFree(gpuInitLast));
+    checkCudaErrors(cudaFree(gpuDeltaLast));
 }
 
 
@@ -111,13 +117,23 @@ float* KaminoQuantity::getGPUNextStep() {
 }
 
 
-float* BimocqQuantity::getGPUInit() {
+float*& BimocqQuantity::getGPUInit() {
     return this->gpuInit;
 }
 
 
-float* BimocqQuantity::getGPUDelta() {
+float*& BimocqQuantity::getGPUDelta() {
     return this->gpuDelta;
+}
+
+
+float*& BimocqQuantity::getGPUInitLast() {
+    return this->gpuInitLast;
+}
+
+
+float*& BimocqQuantity::getGPUDeltaLast() {
+    return this->gpuDeltaLast;
 }
 
 
