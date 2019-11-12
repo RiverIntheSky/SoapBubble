@@ -38,12 +38,14 @@
 # define vThetaThetaOffset 1.0
 
 # define centeredOffset make_float2(0.5f, 0.f) // (theta, phi)
+# define centeredOffsetd make_double2(0.5, 0.0) // (theta, phi)
 # define vPhiOffset make_float2(0.5f, -0.5f)
 # define vThetaOffset make_float2(1.f, 0.f)
 
 //# define getIndex(phi, theta) (theta * this->nPhi + phi)
 
 # define DEBUGBUILD
+# define greatCircle
 
 // The solution to switch between double and float
 typedef float fReal;

@@ -8,7 +8,7 @@
 extern __constant__ float invGridLenGlobal;
 
 __device__ float kaminoLerp(float from, float to, float alpha);
-__device__ float sampleCentered(float* input, float2& rawId, size_t pitch);
+__device__ float sampleCentered(float* input, float2 rawId, size_t pitch);
 __global__ void resetThickness(float2* weight);
 __global__ void initLinearSystem(int* row_ptr, int* col_ind);
 __global__ void initMapping(float* map_theta, float* map_phi);
@@ -100,10 +100,10 @@ private:
 
     cusparseSpMatDescr_t matM; /* pre-conditioner */
 
-    KaminoQuantity* velTheta;
-    KaminoQuantity* velPhi; // u_phi/(sin(theta)) is stored instead of u_phi
-    ScalarQuantity* thickness;
-    ScalarQuantity* surfConcentration;
+    BimocqQuantity* velTheta;
+    BimocqQuantity* velPhi; // u_phi/(sin(theta)) is stored instead of u_phi
+    BimocqQuantity* thickness;
+    BimocqQuantity* surfConcentration;
 
     size_t pitch; // all the quantities have the same padding
     void copyVelocity2GPU();
@@ -171,7 +171,7 @@ public:
     ~KaminoSolver();
 
     void initWithConst(KaminoQuantity* attrib, float val);
-    void initWithConst(ScalarQuantity* attrib, float val);
+    void initWithConst(BimocqQuantity* attrib, float val);
     void initThicknessfromPic(std::string path);
     void initParticlesfromPic(std::string path, size_t parPergrid);
 

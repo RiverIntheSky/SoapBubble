@@ -108,13 +108,13 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
     checkCudaErrors(cudaMemcpyToSymbol(nPhiGlobal, &(this->nPhi), sizeof(size_t)));
     checkCudaErrors(cudaMemcpyToSymbol(nThetaGlobal, &(this->nTheta), sizeof(size_t)));
 
-    this->velPhi = new KaminoQuantity("velPhi", nPhi, nTheta,
+    this->velPhi = new BimocqQuantity("velPhi", nPhi, nTheta,
 				      vPhiPhiOffset, vPhiThetaOffset);
-    this->velTheta = new KaminoQuantity("velTheta", nPhi, nTheta - 1,
+    this->velTheta = new BimocqQuantity("velTheta", nPhi, nTheta - 1,
 					vThetaPhiOffset, vThetaThetaOffset);
-    this->thickness = new ScalarQuantity("eta", nPhi, nTheta,
+    this->thickness = new BimocqQuantity("eta", nPhi, nTheta,
 					 centeredPhiOffset, centeredThetaOffset);
-    this->surfConcentration = new ScalarQuantity("gamma", nPhi, nTheta,
+    this->surfConcentration = new BimocqQuantity("gamma", nPhi, nTheta,
 						 centeredPhiOffset, centeredThetaOffset);
     this->pitch = surfConcentration->getThisStepPitchInElements();
 
@@ -493,7 +493,7 @@ void KaminoSolver::initWithConst(KaminoQuantity* attrib, float val)
 }
 
 
-void KaminoSolver::initWithConst(ScalarQuantity* attrib, float val)
+void KaminoSolver::initWithConst(BimocqQuantity* attrib, float val)
 {
     for (size_t i = 0; i < attrib->getNPhi(); ++i) {
 	for (size_t j = 0; j < attrib->getNTheta(); ++j) {

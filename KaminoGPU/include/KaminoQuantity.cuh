@@ -72,7 +72,7 @@ public:
 };
 
 
-class ScalarQuantity: public KaminoQuantity {
+class BimocqQuantity: public KaminoQuantity {
 private:
     /* initial value */
     float* gpuInit;
@@ -80,10 +80,10 @@ private:
     float* gpuDelta;
 public:
     /* Constructor */
-    ScalarQuantity(std::string attributeName, size_t nPhi, size_t nTheta,
+    BimocqQuantity(std::string attributeName, size_t nPhi, size_t nTheta,
 		   float phiOffset, float thetaOffset);
     /* Destructor */
-    ~ScalarQuantity();
+    ~BimocqQuantity();
 
     float* getGPUInit();
     float* getGPUDelta();

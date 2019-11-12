@@ -22,16 +22,19 @@ KaminoQuantity::KaminoQuantity(std::string attributeName, size_t nPhi, size_t nT
     : nPhi(nPhi), nTheta(nTheta), gridLen(M_2PI / nPhi), invGridLen(1.0 / gridLen),
     attrName(attributeName), phiOffset(phiOffset), thetaOffset(thetaOffset) {
     cpuBuffer = new float[nPhi * nTheta];
-    checkCudaErrors(cudaMallocPitch((void**)&gpuThisStep, &thisStepPitch, nPhi * sizeof(float), nTheta));
-    checkCudaErrors(cudaMallocPitch((void**)&gpuNextStep, &nextStepPitch, nPhi * sizeof(float), nTheta));
+    checkCudaErrors(cudaMallocPitch(&gpuThisStep, &thisStepPitch, nPhi * sizeof(float), nTheta));
+    checkCudaErrors(cudaMallocPitch(&gpuNextStep, &nextStepPitch, nPhi * sizeof(float), nTheta));
+    checkCudaErrors(cudaMemset(gpuThisStep, 0, thisStepPitch * nTheta));
+    checkCudaErrors(cudaMemset(gpuNextStep, 0, nextStepPitch * nTheta));
 }
 
 
-ScalarQuantity::ScalarQuantity(std::string attributeName, size_t nPhi, size_t nTheta,
+BimocqQuantity::BimocqQuantity(std::string attributeName, size_t nPhi, size_t nTheta,
 			       float phiOffset, float thetaOffset)
     : KaminoQuantity(attributeName, nPhi, nTheta, phiOffset, thetaOffset) {
     checkCudaErrors(cudaMallocPitch(&gpuInit, &thisStepPitch, nPhi * sizeof(float), nTheta));
     checkCudaErrors(cudaMallocPitch(&gpuDelta, &thisStepPitch, nPhi * sizeof(float), nTheta));
+    checkCudaErrors(cudaMemset(gpuInit, 0, thisStepPitch * nTheta));
     checkCudaErrors(cudaMemset(gpuDelta, 0, thisStepPitch * nTheta));
 }
 
@@ -44,8 +47,9 @@ KaminoQuantity::~KaminoQuantity() {
 }
 
 
-ScalarQuantity::~ScalarQuantity() {
+BimocqQuantity::~BimocqQuantity() {
     checkCudaErrors(cudaFree(gpuInit));
+    checkCudaErrors(cudaFree(gpuDelta));
 }
 
 
@@ -107,11 +111,12 @@ float* KaminoQuantity::getGPUNextStep() {
 }
 
 
-float* ScalarQuantity::getGPUInit() {
+float* BimocqQuantity::getGPUInit() {
     return this->gpuInit;
 }
 
-float* ScalarQuantity::getGPUDelta() {
+
+float* BimocqQuantity::getGPUDelta() {
     return this->gpuDelta;
 }
 
