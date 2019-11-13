@@ -896,11 +896,11 @@ __global__ void advectionCenteredBimocq
     // Coord in scalar space
     float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
 
-    if (thetaId < float(nThetaGlobal) / 16.f || thetaId > float(nThetaGlobal) * 15.f / 16.f) {
-	float2 traceId = traceRK3(velTheta, velPhi, timeStepGlobal, gId, pitch);
-	at(thicknessOutput, thetaId, phiId, pitch)
-	= sampleCentered(thicknessInput, traceId, pitch);
-    } else {
+    // if (thetaId < float(nThetaGlobal) / 16.f || thetaId > float(nThetaGlobal) * 15.f / 16.f) {
+    // 	float2 traceId = traceRK3(velTheta, velPhi, timeStepGlobal, gId, pitch);
+    // 	at(thicknessOutput, thetaId, phiId, pitch)
+    // 	= sampleCentered(thicknessInput, traceId, pitch);
+    // } else {
 	float thickness = 0.f;
 	//    float gamma = 0.f;
 	for (int i = 0; i < 5; i++) {
@@ -917,7 +917,7 @@ __global__ void advectionCenteredBimocq
 	}
 	at(thicknessOutput, thetaId, phiId, pitch) = thickness;
 	// gammaOutput[thetaId * pitch + phiId] = gamma;
-    }
+	//    }
 }
 
 
@@ -1403,22 +1403,22 @@ __global__ void concentrationLinearSystemKernel
 	 (invDt + CrGlobal / etaUp));
 # endif
 
-    // # ifdef uair
-    //     diva += 20.f * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * (M_hPI - gTheta)
-    // 	* expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal
-    // 	* sinf(gPhi) * cscTheta / UGlobal;
-    // # endif
+# ifdef uair
+    // sinThetaDiv += 20.f * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * (M_hPI - gTheta)
+    // 	* expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal * cscTheta / UGlobal *
+    // 	invGridLenGlobal * (cosf(gPhi + halfStep) / (etaRight / CrGlobal * invDt + 1.f) -
+    // 			    cosf(gPhi - halfStep) / (etaLeft / CrGlobal * invDt + 1.f));
+# endif
     // # ifdef vair
     //     diva += (gTheta < M_hPI) * 4 * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * cosTheta
     // 	* cosf(2 * gPhi) * radiusGlobal / UGlobal;
     // # endif
     
-    rhs[idx] = sinTheta * invDt - sinThetaDiv;
 # ifdef gravity
-    // rhs[idx] += gGlobal * invGridLenGlobal *
+    // sinThetaDiv += gGlobal * invGridLenGlobal *
     // 	(sinThetaSouth * sinThetaSouth / (invDt + CrGlobal / etaDown) -
     // 	 sinThetaNorth * sinThetaNorth / (invDt + CrGlobal / etaUp));
-    rhs[idx] -= 0.57735026919 * gGlobal * invGridLenGlobal *
+    sinThetaDiv += 0.57735026919 * gGlobal * invGridLenGlobal *
     	((cosf(gPhi + halfStep) - sinf(gPhi + halfStep)) / (invDt + CrGlobal / etaRight) -
     	 (cosf(gPhi - halfStep) - sinf(gPhi - halfStep)) / (invDt + CrGlobal / etaLeft) +
     	 (cosf(gTheta + halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaSouth)
@@ -1426,7 +1426,7 @@ __global__ void concentrationLinearSystemKernel
     	 (cosf(gTheta - halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaNorth)
     	 / (invDt + CrGlobal / etaUp) * sinThetaNorth);
 # endif
-
+    rhs[idx] = sinTheta * invDt - sinThetaDiv;
 }
 
 
@@ -1563,7 +1563,7 @@ __global__ void applyforcevelthetaKernel
     float f3 = 0.f;
 # ifdef gravity
 # ifdef sphere
-    // f3 = -gGlobal * sinf(gTheta);
+    // f3 = gGlobal * sinf(gTheta);
     f3 = 0.57735026919 * (cosf(gTheta)*(cosf(gPhi) + sinf(gPhi))+sinf(gTheta)) * gGlobal;
 # else
     f3 = gGlobal;
@@ -1619,12 +1619,17 @@ __global__ void applyforcevelphiKernel
     // air friction
     float uAir = 0.f;
 # if defined uair && defined sphere
-    uAir = 20.f * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * (M_hPI - gTheta)
-	* expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal
-	* cosf(gPhi) / UGlobal;
+    // uAir = 20.f * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * (M_hPI - gTheta)
+    // 	* expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal
+    // 	* cosf(gPhi) / UGlobal;
+    uAir = 2.f * (1.f - smoothstep(0.f, 10.f, currentTimeGlobal)) / UGlobal * sinTheta
+	* (1.f - smoothstep(M_PI * 0.1875, M_PI * 0.3125, fabsf(gTheta - M_hPI))) * radiusGlobal;
 # endif
     float f2 = CrGlobal * invDelta * uAir;
-    float f3 = 0.57735026919 * (cosf(gPhi) - sinf(gPhi)) * gGlobal;
+    float f3;
+# ifdef gravity
+    f3 = 0.57735026919 * (cosf(gPhi) - sinf(gPhi)) * gGlobal;
+# endif
 # ifdef greatCircle
     float f4 = 0.f;
 # else
@@ -2620,22 +2625,25 @@ void KaminoSolver::reInitializeMapping() {
     dim3 gridLayout;
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
-	
-    correctThickness1<<<gridLayout, blockLayout>>>
-    	(thickness->getGPUThisStep(), tmp_t, thickness->getGPUDelta(), thickness->getGPUInit(),
-    	 forward_t, forward_p, pitch);
-    checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
 
-    CHECK_CUDA(cudaMemcpy(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
-    			  thickness->getNTheta() * pitch * sizeof(float),
-    			  cudaMemcpyDeviceToDevice));
+    bool errorCorrection = false;
+    if (errorCorrection) {
+	correctThickness1<<<gridLayout, blockLayout>>>
+	    (thickness->getGPUThisStep(), tmp_t, thickness->getGPUDelta(), thickness->getGPUInit(),
+	     forward_t, forward_p, pitch);
+	checkCudaErrors(cudaGetLastError());
+	checkCudaErrors(cudaDeviceSynchronize());
+
+	CHECK_CUDA(cudaMemcpy(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
+			      thickness->getNTheta() * pitch * sizeof(float),
+			      cudaMemcpyDeviceToDevice));
       
-    correctThickness2<<<gridLayout, blockLayout>>>
-    	(thickness->getGPUNextStep(), thickness->getGPUThisStep(), tmp_t,
-    	 backward_t, backward_p, pitch);
-    checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
+	correctThickness2<<<gridLayout, blockLayout>>>
+	    (thickness->getGPUNextStep(), thickness->getGPUThisStep(), tmp_t,
+	     backward_t, backward_p, pitch);
+	checkCudaErrors(cudaGetLastError());
+	checkCudaErrors(cudaDeviceSynchronize());
+    }
 
     //  determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
     // correctVTheta1<<<gridLayout, blockLayout>>>
