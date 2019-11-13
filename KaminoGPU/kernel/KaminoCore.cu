@@ -2308,47 +2308,49 @@ __global__ void correctThickness2(float* thicknessOutput, float* thicknessInput,
     float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
 
     // sample
-    if (thetaId < float(nThetaGlobal) / 16.f || thetaId > float(nThetaGlobal) * 15.f / 16.f)
-	return;
+    // if (thetaId < float(nThetaGlobal) / 16.f || thetaId > float(nThetaGlobal) * 15.f / 16.f)
+    // 	return;
     
     for (int i = 0; i < 5; i++) {
 	float2 posId = gId + dir[i];
 	float2 sampleId = sampleMapping(bwd_t, bwd_p, posId);
-	at(thicknessInput, thetaId, phiId, pitch)
+	at(thicknessOutput, thetaId, phiId, pitch)
 	    -= w[i] * sampleCentered(thicknessError, sampleId, nPhiGlobal);
-	// at(gammaInput, thetaId, phiId, pitch)
+	// at(gammaOutput, thetaId, phiId, pitch)
 	//     -= w[i] * sampleCentered(gammaError, sampleId, nPhiGlobal);
     }
 
     // clamp local extrema
     int range[] = {-1, 0, 1};
 
-    float minVal = at(thicknessOutput, thetaId, phiId, pitch);
-    float maxVal = 0.f;
+    float minVal = at(thicknessInput, thetaId, phiId, pitch);
+    float maxVal = minVal;
     for (int t : range) {
 	for (int p : range) {
 	    int2 sampleId = make_int2(thetaId + t, phiId + p);
 	    validateId(sampleId);
-	    float currentVal = at(thicknessOutput, sampleId, pitch);
+	    float currentVal = at(thicknessInput, sampleId, pitch);
 	    minVal = fminf(minVal, currentVal);
 	    maxVal = fmaxf(maxVal, currentVal);
 	}
     }
     at(thicknessOutput, thetaId, phiId, pitch)
-	= clamp(at(thicknessInput, thetaId, phiId, pitch), minVal, maxVal);
-    // minVal = at(gammaOutput, thetaId, phiId, pitch);
+	= clamp(at(thicknessOutput, thetaId, phiId, pitch), minVal, maxVal);
+
+
+    // minVal = at(gammaInput, thetaId, phiId, pitch);
     // maxVal = 0.f;
     // for (int t : range) {
     // 	for (int p : range) {
     // 	    int2 sampleId = make_int2(thetaId + t, phiId + p);
     // 	    validateId(sampleId);
-    // 	    float currentVal = at(gammaOutput, sampleId, pitch);
+    // 	    float currentVal = at(gammaInput, sampleId, pitch);
     // 	    minVal = fminf(minVal, currentVal);
     // 	    maxVal = fmaxf(maxVal, currentVal);
     // 	}
     // }
     // at(gammaOutput, thetaId, phiId, pitch)
-    // 	= clamp(at(gammaInput, thetaId, phiId, pitch), minVal, maxVal);
+    // 	= clamp(at(gammaOutnput, thetaId, phiId, pitch), minVal, maxVal);
 }
 
 __global__ void correctVTheta1(float* vThetaCurr, float* vThetaError, float* vThetaDelta,
@@ -2626,20 +2628,20 @@ void KaminoSolver::reInitializeMapping() {
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
 
-    bool errorCorrection = false;
+    bool errorCorrection = true;
     if (errorCorrection) {
+	CHECK_CUDA(cudaMemcpy(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
+			      thickness->getNTheta() * pitch * sizeof(float),
+			      cudaMemcpyDeviceToDevice));
+
 	correctThickness1<<<gridLayout, blockLayout>>>
 	    (thickness->getGPUThisStep(), tmp_t, thickness->getGPUDelta(), thickness->getGPUInit(),
 	     forward_t, forward_p, pitch);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
 
-	CHECK_CUDA(cudaMemcpy(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
-			      thickness->getNTheta() * pitch * sizeof(float),
-			      cudaMemcpyDeviceToDevice));
-      
 	correctThickness2<<<gridLayout, blockLayout>>>
-	    (thickness->getGPUNextStep(), thickness->getGPUThisStep(), tmp_t,
+	    (thickness->getGPUThisStep(), thickness->getGPUNextStep(), tmp_t,
 	     backward_t, backward_p, pitch);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
