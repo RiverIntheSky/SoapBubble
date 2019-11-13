@@ -80,5 +80,5 @@ enum Coord { phi, theta };
 # define sphere
 # define gravity
 # define uair
+# define evaporation -0.000000004
 // # define vair
- 

@@ -21,6 +21,7 @@ static __constant__ float DsGlobal;
 static __constant__ float CrGlobal;
 static __constant__ float UGlobal;
 static __constant__ float blend_coeff;
+static __constant__ float evaporationRate;
 
 
 # define eps 1e-5f
@@ -1985,13 +1986,15 @@ __global__ void applyforceThickness
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
 
-    float eta = thicknessInput[thetaId * pitch + phiId];
-    float f = div[thetaId * nPhiGlobal + phiId];
+    float eta = at(thicknessInput, thetaId, phiId, pitch);
+    float f = at(div, thetaId, phiId);
 
-    thicknessOutput[thetaId * pitch + phiId] = eta * (1 - timeStepGlobal * f);
-    thicknessDelta[thetaId * nPhiGlobal + phiId] = thicknessOutput[thetaId * pitch + phiId] - eta;
+    at(thicknessOutput, thetaId, phiId, pitch) = eta * (1 - timeStepGlobal * f);
+# ifdef evaporation
+    at(thicknessOutput, thetaId, phiId, pitch) += evaporationRate * timeStepGlobal;
+# endif
+    at(thicknessDelta, thetaId, phiId) = at(thicknessOutput, thetaId, phiId, pitch) - eta;
 }
-
 
 // Backward Euler
 // __global__ void applyforceSurfConcentration
@@ -3099,6 +3102,10 @@ void Kamino::run()
     checkCudaErrors(cudaMemcpyToSymbol(CrGlobal, &(this->Cr), sizeof(float)));
     checkCudaErrors(cudaMemcpyToSymbol(UGlobal, &(this->U), sizeof(float)));
     checkCudaErrors(cudaMemcpyToSymbol(blend_coeff, &(this->blendCoeff), sizeof(float)));
+# ifdef evaporation
+    float eva = evaporation * radius / (H * U);
+    checkCudaErrors(cudaMemcpyToSymbol(evaporationRate, &eva, sizeof(float)));
+# endif
 
     solver.initThicknessfromPic(thicknessImage);
 

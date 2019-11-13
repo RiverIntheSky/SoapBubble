@@ -9,8 +9,8 @@ rm 0.000000005
 numberOfGridsInTheta 256
 timePerStep 0.0005
 timePerFrame 0.02
-frameNumbers 800
-outputDir ../out/test
+frameNumbers 1500
+outputDir ../out/evaporation
 thicknessInit ../init/midFrequency.exr
 AMGconfig ../init/PCGF_F.json
 blendCoeff 0.4
