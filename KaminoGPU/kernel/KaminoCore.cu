@@ -543,8 +543,8 @@ __global__ void	updateMappingKernel(float* velTheta, float* velPhi, float dt,
 
     validateCoord(sampledId);
 
-    tmp_p[thetaId * nPhiGlobal + phiId] = sampledId.y;
-    tmp_t[thetaId * nPhiGlobal + phiId] = sampledId.x;
+    at(tmp_p, thetaId, phiId) = sampledId.y;
+    at(tmp_t, thetaId, phiId) = sampledId.x;
 }
 
 
@@ -645,7 +645,7 @@ __global__ void advectionVSpherePhiKernel
     puPhi = dot(pu, uCircleP_);
 
     pu = puPhi * u_ + puTheta * v_;
-    velPhiOutput[thetaId * pitch + phiId] = dot(pu, ePhi) / sinTheta;
+    at(velPhiOutput, thetaId, phiId, pitch) = dot(pu, ePhi) / sinTheta;
 }
 
 
@@ -942,7 +942,7 @@ __global__ void advectionVThetaBimocq
     float2 gId = make_float2((float)thetaId, (float)phiId) + vThetaOffset;
 
     if (thetaId < float(nThetaGlobal) / 16.f || thetaId > float(nThetaGlobal) * 15.f / 16.f) {
-	float2 traceId = traceRK3(velThetaInput, velPhi, timeStepGlobal, gId, pitch);
+    	float2 traceId = traceRK3(velThetaInput, velPhi, timeStepGlobal, gId, pitch);
     	at(velThetaOutput, thetaId, phiId, pitch) = sampleVTheta(velThetaInput, traceId, pitch);
     } else {
 	float v = 0.f;
@@ -1035,6 +1035,7 @@ void KaminoSolver::updateForward(float dt, float* &fwd_t, float* &fwd_p) {
 	std::swap(fwd_p, tmp_p);
     }
 }
+
 
 void KaminoSolver::updateBackward(float dt, float* &bwd_t, float* &bwd_p) {
     float T = 0.0;
@@ -1576,8 +1577,8 @@ __global__ void applyforcevelthetaKernel
     float f4 = u * u * sinf(gTheta) * cosf(gTheta);
 # endif
 
-    velThetaOutput[thetaId * pitch + phiId] = (v1 / timeStepGlobal + f1 + f2 + f3 + f4) / (1./timeStepGlobal + CrGlobal * invDelta);
-    velThetaDelta[thetaId * pitch + phiId] = velThetaOutput[thetaId * pitch + phiId] - v1;
+    at(velThetaOutput, thetaId, phiId, pitch) = (v1 / timeStepGlobal + f1 + f2 + f3 + f4) / (1./timeStepGlobal + CrGlobal * invDelta);
+    at(velThetaDelta, thetaId, phiId) = at(velThetaOutput, thetaId, phiId, pitch) - v1;
 }
 
 
@@ -1637,9 +1638,9 @@ __global__ void applyforcevelphiKernel
     float f4 = -u1 * v * cosf(gTheta);
 # endif
         
-    velPhiOutput[thetaId * pitch + phiId] = (u1 * sinTheta / timeStepGlobal + f1 + f2 + f3 + f4)
+    at(velPhiOutput, thetaId, phiId, pitch) = (u1 * sinTheta / timeStepGlobal + f1 + f2 + f3 + f4)
 	/ (1./timeStepGlobal + CrGlobal * invDelta) / sinTheta;
-    velPhiDelta[thetaId * pitch + phiId] = velPhiOutput[thetaId * pitch + phiId] - u1;
+    at(velPhiDelta, thetaId, phiId) = at(velPhiOutput, thetaId, phiId, pitch) - u1;
 }
 
 
@@ -2576,10 +2577,6 @@ void KaminoSolver::bodyforce() {
 	applyforceThickness<<<gridLayout, blockLayout>>>
 	    (thickness->getGPUNextStep(), thickness->getGPUThisStep(),
 	     tmp_t, div, thickness->getNextStepPitchInElements());
-    
-	// substractPitched<<<gridLayout, blockLayout>>>
-	// 	(tmp_p, surfConcentration->getGPUNextStep(),
-	// 	 surfConcentration->getGPUThisStep(), pitch);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
 
@@ -2629,10 +2626,10 @@ void KaminoSolver::bodyforce() {
 void KaminoSolver::reInitializeMapping() {
     dim3 gridLayout;
     dim3 blockLayout;
-    determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
 
     bool errorCorrection = true;
     if (errorCorrection) {
+	determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
 	CHECK_CUDA(cudaMemcpy(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
 			      thickness->getNTheta() * pitch * sizeof(float),
 			      cudaMemcpyDeviceToDevice));
@@ -2648,45 +2645,41 @@ void KaminoSolver::reInitializeMapping() {
 	     backward_t, backward_p, pitch);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
+
+	// determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
+	// CHECK_CUDA(cudaMemcpy(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(),
+	// 		      velTheta->getNTheta() * pitch * sizeof(float),
+	// 		      cudaMemcpyDeviceToDevice));
+
+	// correctVTheta1<<<gridLayout, blockLayout>>>
+	//     (velTheta->getGPUThisStep(), tmp_t, velTheta->getGPUDelta(), velTheta->getGPUInit(),
+	//      forward_t, forward_p, pitch);
+	// checkCudaErrors(cudaGetLastError());
+	// checkCudaErrors(cudaDeviceSynchronize());
+
+	// correctVTheta2<<<gridLayout, blockLayout>>>
+	//     (velTheta->getGPUThisStep(), velTheta->getGPUNextStep(), tmp_t,
+	//      backward_t, backward_p, pitch);
+	// checkCudaErrors(cudaGetLastError());
+	// checkCudaErrors(cudaDeviceSynchronize());
+
+	// determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
+	// CHECK_CUDA(cudaMemcpy(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(),
+	// 		      velPhi->getNTheta() * pitch * sizeof(float),
+	// 		      cudaMemcpyDeviceToDevice));
+      
+	// correctVPhi1<<<gridLayout, blockLayout>>>
+	//     (velPhi->getGPUThisStep(), tmp_t, velPhi->getGPUDelta(), velPhi->getGPUInit(),
+	//      forward_t, forward_p, pitch);
+	// checkCudaErrors(cudaGetLastError());
+	// checkCudaErrors(cudaDeviceSynchronize());
+
+	// correctVPhi2<<<gridLayout, blockLayout>>>
+	//     (velPhi->getGPUThisStep(), velPhi->getGPUNextStep(), tmp_t,
+	//      backward_t, backward_p, pitch);
+	// checkCudaErrors(cudaGetLastError());
+	// checkCudaErrors(cudaDeviceSynchronize());
     }
-
-    //  determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
-    // correctVTheta1<<<gridLayout, blockLayout>>>
-    // 	(velTheta->getGPUThisStep(), tmp_t, velTheta->getGPUDelta(), velTheta->getGPUInit(),
-    // 	 forward_t, forward_p, pitch);
-    // checkCudaErrors(cudaGetLastError());
-    // checkCudaErrors(cudaDeviceSynchronize());
-
-    // CHECK_CUDA(cudaMemcpy(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(),
-    // 			  velTheta->getNTheta() * pitch * sizeof(float),
-    // 			  cudaMemcpyDeviceToDevice));
-      
-    // correctVTheta2<<<gridLayout, blockLayout>>>
-    // 	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), tmp_t,
-    // 	 backward_t, backward_p, pitch);
-    // checkCudaErrors(cudaGetLastError());
-    // checkCudaErrors(cudaDeviceSynchronize());
-
-    
-    //  determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
-    // correctVPhi1<<<gridLayout, blockLayout>>>
-    // 	(velPhi->getGPUThisStep(), tmp_t, velPhi->getGPUDelta(), velPhi->getGPUInit(),
-    // 	 forward_t, forward_p, pitch);
-    // checkCudaErrors(cudaGetLastError());
-    // checkCudaErrors(cudaDeviceSynchronize());
-
-    // CHECK_CUDA(cudaMemcpy(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(),
-    // 			  velPhi->getNTheta() * pitch * sizeof(float),
-    // 			  cudaMemcpyDeviceToDevice));
-      
-    // correctVPhi2<<<gridLayout, blockLayout>>>
-    // 	(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(), tmp_t,
-    // 	 backward_t, backward_p, pitch);
-    // checkCudaErrors(cudaGetLastError());
-    // checkCudaErrors(cudaDeviceSynchronize());
-    
-    //swapVelocityBuffers();
-    // thickness->swapGPUBuffer();
 
     std::swap(this->thickness->getGPUInitLast(), this->thickness->getGPUInit());
     std::swap(this->thickness->getGPUDeltaLast(), this->thickness->getGPUDelta());
@@ -2700,20 +2693,7 @@ void KaminoSolver::reInitializeMapping() {
     CHECK_CUDA(cudaMemset(this->thickness->getGPUDelta(), 0,
 			  pitch * sizeof(float) * this->thickness->getNTheta()));
 
-    // CHECK_CUDA(cudaMemcpy(this->velTheta->getGPUInit(), this->velTheta->getGPUThisStep(),
-    // 			  this->velTheta->getThisStepPitchInElements() * this->velTheta->getNTheta() *
-    // 			  sizeof(float), cudaMemcpyDeviceToDevice));
-
-    // CHECK_CUDA(cudaMemset(this->velTheta->getGPUDelta(), 0,
-    // 			  pitch * this->velTheta->getNTheta()));
-
-    // CHECK_CUDA(cudaMemcpy(this->velPhi->getGPUInit(), this->velPhi->getGPUThisStep(),
-    // 			  this->velPhi->getThisStepPitchInElements() * this->velPhi->getNTheta() *
-    // 			  sizeof(float), cudaMemcpyDeviceToDevice));
-
-    // CHECK_CUDA(cudaMemset(this->velPhi->getGPUDelta(), 0,
-    // 			  pitch * this->velPhi->getNTheta()));
-
+    determineLayout(gridLayout, blockLayout, nTheta, nPhi);
     initMapping<<<gridLayout, blockLayout>>>(forward_t, forward_p);
     initMapping<<<gridLayout, blockLayout>>>(backward_t, backward_p);
     CHECK_CUDA(cudaGetLastError());

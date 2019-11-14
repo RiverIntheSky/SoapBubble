@@ -435,8 +435,9 @@ void KaminoSolver::stepForward() {
     this->timeElapsed += this->timeStep;
 
     float distortion = estimateDistortion();
+        
     std::cout << "max distortion " << distortion << std::endl;
-    if (distortion > nTheta / 128) {
+    if (distortion > nTheta / 128.f) {
     	reInitializeMapping();
     }
 }
