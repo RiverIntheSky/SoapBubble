@@ -71,7 +71,7 @@ enum Coord { phi, theta };
 # define WRITE_VELOCITY_DATA
 // # define WRITE_PARTICLES
 # define WRITE_THICKNESS_DATA
-// # define WRITE_CONCENTRATION_DATA
+# define WRITE_CONCENTRATION_DATA
 # define RUNGE_KUTTA
 // # define RK2
 # define RK3
@@ -80,5 +80,5 @@ enum Coord { phi, theta };
 # define sphere
 # define gravity
 # define uair
-# define evaporation -0.000000004
+# define evaporation -0.000000005
 // # define vair

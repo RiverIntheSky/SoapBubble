@@ -22,6 +22,8 @@ static __constant__ float CrGlobal;
 static __constant__ float UGlobal;
 static __constant__ float blend_coeff;
 static __constant__ float evaporationRate;
+static __constant__ float W1;
+static __constant__ float W2;
 
 
 # define eps 1e-5f
@@ -1302,7 +1304,7 @@ __global__ void divergenceKernel_fromGamma(float* div, float* gammaNext, float* 
 
 __global__ void concentrationLinearSystemKernel
 (float* velPhi_a, float* velTheta_a, float* gamma_a, float* eta_a,
- float* val, float* rhs, size_t pitch) {
+ float* W, float* val, float* rhs, size_t pitch) {
     // TODO: pre-compute eta???
     int splitVal = nPhiGlobal / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
@@ -1331,34 +1333,40 @@ __global__ void concentrationLinearSystemKernel
     float etaEast = at(eta_a, thetaId, phiIdEast, pitch);
     float etaNorth = 0.f;
     float etaSouth = 0.f;
+    float WMid = at(W, thetaId, phiId, pitch);
+    float WWest = at(W, thetaId, phiIdWest, pitch);
+    float WEast = at(W, thetaId, phiIdEast, pitch);
+    float WNorth = 0.f;
+    float WSouth = 0.f;
+    float uWest = at(velPhi_a, thetaId, phiId, pitch);
+    float uEast = at(velPhi_a, thetaId, phiIdEast, pitch);
     float uNorth = 0.f;
     float uSouth = 0.f;
-    float uWest = 0.f;
-    float uEast = 0.f;
-    float vNorth = 0.f;
-    float vSouth = 0.f;
     float vWest = sampleVTheta(velTheta_a, make_float2(gTheta, gPhi - halfStep), pitch);
     float vEast = sampleVTheta(velTheta_a, make_float2(gTheta, gPhi + halfStep), pitch);
-
-    uWest = at(velPhi_a, thetaId, phiId, pitch);
-    uEast = at(velPhi_a, thetaId, phiIdEast, pitch);
+    float vNorth = 0.f;
+    float vSouth = 0.f;
 
     if (thetaId != 0) {
 	size_t thetaNorthIdx = thetaId - 1;
 	vNorth = at(velTheta_a, thetaNorthIdx, phiId, pitch);
 	uNorth = sampleVPhi(velPhi_a, make_float2(gTheta - halfStep, gPhi), pitch);
     	etaNorth = at(eta_a, thetaNorthIdx, phiId, pitch);
+	WNorth = at(W, thetaNorthIdx, phiId, pitch);
     } else {
     	int oppositePhiId = (phiId + nThetaGlobal) % nPhiGlobal;
     	etaNorth = eta_a[oppositePhiId];
+	WNorth = W[oppositePhiId];
     }
     if (thetaId != nThetaGlobal - 1) {
 	vSouth = at(velTheta_a, thetaId, phiId, pitch);
 	uSouth = sampleVPhi(velPhi_a, make_float2(gTheta + halfStep, gPhi), pitch);
     	etaSouth = at(eta_a, thetaId + 1, phiId, pitch);
+	WSouth = at(W, thetaId + 1, phiId, pitch);
     } else {
     	int oppositePhiId = (phiId + nThetaGlobal) % nPhiGlobal;
     	etaSouth = at(eta_a, thetaId, oppositePhiId, pitch);
+	WSouth = at(W, thetaId, oppositePhiId, pitch);
     }
     // at both poles sin(theta) = 0;
 
@@ -1389,20 +1397,28 @@ __global__ void concentrationLinearSystemKernel
 
     // rhs
     // \sin\theta * div
+    // u^*
     float sinThetaDiv = invGridLenGlobal *
-	(sinTheta * (uEast / (1.f + CrGlobal * timeStepGlobal / etaRight) -
-		     uWest / (1.f + CrGlobal * timeStepGlobal / etaLeft)) +
-	 (vSouth * sinThetaSouth / (1.f + CrGlobal * timeStepGlobal / etaDown) -
-	  vNorth * sinThetaNorth / (1.f + CrGlobal * timeStepGlobal / etaUp)));
+	(sinTheta * (uEast * etaRight / (etaRight + CrGlobal * timeStepGlobal) -
+		     uWest * etaLeft / (etaLeft + CrGlobal * timeStepGlobal)) +
+	 (vSouth * sinThetaSouth * etaDown / (etaDown + CrGlobal * timeStepGlobal) -
+	  vNorth * sinThetaNorth * etaUp / (etaUp + CrGlobal * timeStepGlobal)));
+
+    // van der Waals
+    sinThetaDiv -= invGridLenGlobal * invGridLenGlobal *
+	(cscTheta * ((WEast - WMid) * etaRight / (invDt * etaRight + CrGlobal) -
+		     (WMid - WWest) * etaLeft/ (invDt * etaLeft + CrGlobal)) +
+	 sinThetaSouth * (WSouth - WMid) * etaDown / (invDt * etaDown + CrGlobal) -
+	 sinThetaNorth * (WMid - WNorth) * etaUp / (invDt * etaUp + CrGlobal));
 
 # ifndef greatCircle
     sinThetaDiv += invGridLenGlobal *
-	(cosTheta * (uWest * vWest / (invDt + CrGlobal / etaLeft) -
-		     uEast * vEast / (invDt + CrGlobal / etaRight)) +
-	 uSouth * uSouth * sinThetaSouth * sinThetaSouth * cosf(gTheta + halfStep) /
-	 (invDt + CrGlobal / etaDown) -
-	 uNorth * uNorth * sinThetaNorth * sinThetaNorth * cosf(gTheta - halfStep) /
-	 (invDt + CrGlobal / etaUp));
+	(cosTheta * (uWest * vWest * etaLeft / (invDt * etaLeft + CrGlobal) -
+		     uEast * vEast * etaRight/ (invDt * etaRight + CrGlobal)) +
+	 uSouth * uSouth * sinThetaSouth * sinThetaSouth * cosf(gTheta + halfStep)
+	 * etaDown / (invDt * etaDown + CrGlobal) -
+	 uNorth * uNorth * sinThetaNorth * sinThetaNorth * cosf(gTheta - halfStep)
+	 * etaUp / (invDt * etaUp + CrGlobal));
 # endif
 
 # ifdef uair
@@ -1421,12 +1437,14 @@ __global__ void concentrationLinearSystemKernel
     // 	(sinThetaSouth * sinThetaSouth / (invDt + CrGlobal / etaDown) -
     // 	 sinThetaNorth * sinThetaNorth / (invDt + CrGlobal / etaUp));
     sinThetaDiv += 0.57735026919 * gGlobal * invGridLenGlobal *
-    	((cosf(gPhi + halfStep) - sinf(gPhi + halfStep)) / (invDt + CrGlobal / etaRight) -
-    	 (cosf(gPhi - halfStep) - sinf(gPhi - halfStep)) / (invDt + CrGlobal / etaLeft) +
+    	((cosf(gPhi + halfStep) - sinf(gPhi + halfStep)) * etaRight
+	 / (invDt * etaRight + CrGlobal) -
+    	 (cosf(gPhi - halfStep) - sinf(gPhi - halfStep)) * etaLeft
+	 / (invDt * etaLeft + CrGlobal) +
     	 (cosf(gTheta + halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaSouth)
-    	 / (invDt + CrGlobal / etaDown) * sinThetaSouth -
+    	 / (invDt * etaDown + CrGlobal) * sinThetaSouth * etaDown -
     	 (cosf(gTheta - halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaNorth)
-    	 / (invDt + CrGlobal / etaUp) * sinThetaNorth);
+    	 / (invDt * etaUp + CrGlobal) * sinThetaNorth * etaUp);
 # endif
     rhs[idx] = sinTheta * invDt - sinThetaDiv;
 }
@@ -1507,7 +1525,6 @@ void KaminoSolver::AlgebraicMultiGridCG() {
 			    surfConcentration->getThisStepPitchInElements() * sizeof(float),
 			    nPhi * sizeof(float), nTheta,
 			    cudaMemcpyDeviceToDevice));
-
     AMGX_vector_upload(b, N, 1, rhs);
     AMGX_vector_upload(x, N, 1, d_x);
     AMGX_matrix_upload_all(A, N, nz, 1, 1, row_ptr, col_ind, val, 0);
@@ -1521,11 +1538,13 @@ void KaminoSolver::AlgebraicMultiGridCG() {
     int num_iter;
     AMGX_solver_get_iterations_number(solver, &num_iter);
     std::cout <<  "Total Iterations:  " << num_iter << std::endl;
+    if (num_iter > 100)
+	setBroken(true);
 }
 
 __global__ void applyforcevelthetaKernel
-(float* velThetaOutput, float* velThetaInput, float* velThetaDelta,
- float* velPhi, float* thickness, float* concentration, size_t pitch) {
+(float* velThetaOutput, float* velThetaInput, float* velThetaDelta, float* velPhi,
+ float* thickness, float* W, float* concentration, size_t pitch) {
     int splitVal = nPhiGlobal / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
@@ -1538,29 +1557,31 @@ __global__ void applyforcevelthetaKernel
 
     int thetaSouthId = thetaId + 1;
 
-    float v1 = velThetaInput[thetaId * pitch + phiId];
+    float v1 = at(velThetaInput, thetaId, phiId, pitch);
     float u = sampleVPhi(velPhi, make_float2(gTheta, gPhi), pitch);
 
-    float GammaNorth = concentration[thetaId * pitch + phiId];
-    float GammaSouth = concentration[thetaSouthId * pitch + phiId];
-    float DeltaNorth = thickness[thetaId * pitch + phiId];
-    float DeltaSouth = thickness[thetaSouthId * pitch + phiId];
+    float GammaNorth = at(concentration, thetaId, phiId, pitch);
+    float GammaSouth = at(concentration, thetaSouthId, phiId, pitch);
+    float EtaNorth = at(thickness, thetaId, phiId, pitch);
+    float EtaSouth = at(thickness, thetaSouthId, phiId, pitch);
+    float WNorth = at(W, thetaId, phiId, pitch);
+    float WSouth = at(W, thetaSouthId, phiId, pitch);
 
     // value at vTheta grid
-    float invDelta = 2. / (DeltaNorth + DeltaSouth);
+    float invEta = 2. / (EtaNorth + EtaSouth);
 
     // pGpy = \frac{\partial\Gamma}{\partial\theta};
     float pGpy = invGridLenGlobal * (GammaSouth - GammaNorth);
 
     // elasticity
-    float f1 = -MGlobal * invDelta * pGpy;
+    float f1 = -MGlobal * invEta * pGpy;
     // air friction
     float vAir = 0.f;
 # if defined vair && defined sphere
     vAir = (gTheta < M_hPI) * 2 * (1 - smoothstep(0.f, 10.f, currentTimeGlobal))
 	* sinf(gTheta) * cosf(2 * gPhi) * radiusGlobal / UGlobal;
 # endif
-    float f2 = CrGlobal * invDelta * vAir;
+    float f2 = CrGlobal * invEta * vAir;
     // gravity
     float f3 = 0.f;
 # ifdef gravity
@@ -1576,15 +1597,18 @@ __global__ void applyforcevelthetaKernel
 # else
     float f4 = u * u * sinf(gTheta) * cosf(gTheta);
 # endif
+    // van der Waals
+    float f5 = invGridLenGlobal * (WNorth - WSouth);
 
-    at(velThetaOutput, thetaId, phiId, pitch) = (v1 / timeStepGlobal + f1 + f2 + f3 + f4) / (1./timeStepGlobal + CrGlobal * invDelta);
+    at(velThetaOutput, thetaId, phiId, pitch) = (v1 / timeStepGlobal + f1 + f2 + f3 + f4 + f5)
+	/ (1./timeStepGlobal + CrGlobal * invEta);
     at(velThetaDelta, thetaId, phiId) = at(velThetaOutput, thetaId, phiId, pitch) - v1;
 }
 
 
 __global__ void applyforcevelphiKernel
 (float* velPhiOutput, float* velPhiInput, float* velPhiDelta, float* velTheta,
- float* thickness, float* concentration, size_t pitch) {
+ float* thickness, float* W, float* concentration, size_t pitch) {
     int splitVal = nPhiGlobal / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
@@ -1595,6 +1619,7 @@ __global__ void applyforcevelphiKernel
     float gPhi = ((float)phiId + vPhiPhiOffset) * gridLenGlobal;
     float gTheta = ((float)thetaId + vPhiThetaOffset) * gridLenGlobal;
     float sinTheta = sinf(gTheta);
+    float cscTheta = 1.f / sinTheta;
 # else
     sinTheta = 1.f; // no effect
 # endif
@@ -1602,22 +1627,24 @@ __global__ void applyforcevelphiKernel
     int phiWestId = (phiId - 1 + nPhiGlobal) % nPhiGlobal;
 
     // values at centered grid
-    float DeltaWest = thickness[thetaId * pitch + phiWestId];
-    float DeltaEast = thickness[thetaId * pitch + phiId];
-    float GammaWest = concentration[thetaId * pitch + phiWestId];
-    float GammaEast = concentration[thetaId * pitch + phiId];
+    float EtaWest = at(thickness, thetaId, phiWestId, pitch);
+    float EtaEast = at(thickness, thetaId, phiId, pitch);
+    float GammaWest = at(concentration, thetaId, phiWestId, pitch);
+    float GammaEast = at(concentration, thetaId, phiId, pitch);
+    float WWest = at(W, thetaId, phiWestId, pitch);
+    float WEast = at(W, thetaId, phiId, pitch);
     
     float u1 = velPhiInput[thetaId * pitch + phiId];
     float v = sampleVTheta(velTheta, make_float2(gTheta, gPhi), pitch);
         
     // value at uPhi grid
-    float invDelta = 2. / (DeltaWest + DeltaEast);
+    float invEta = 2. / (EtaWest + EtaEast);
     
     // pGpx = frac{1}{\sin\theta}\frac{\partial\Gamma}{\partial\phi};
-    float pGpx = invGridLenGlobal * (GammaEast - GammaWest) / sinTheta;
+    float pGpx = invGridLenGlobal * (GammaEast - GammaWest) * cscTheta;
     
     // elasticity
-    float f1 = -MGlobal * invDelta * pGpx;
+    float f1 = -MGlobal * invEta * pGpx;
     // air friction
     float uAir = 0.f;
 # if defined uair && defined sphere
@@ -1625,10 +1652,10 @@ __global__ void applyforcevelphiKernel
     // 	* expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal
     // 	* cosf(gPhi) / UGlobal;
     uAir = 2.f * (1.f - smoothstep(0.f, 10.f, currentTimeGlobal)) / UGlobal * sinTheta
-	* (1.f - smoothstep(M_PI * 0.1875, M_PI * 0.3125, fabsf(gTheta - M_hPI))) * radiusGlobal;
+	* (1.f - smoothstep(M_PI * 0.09375, M_PI * 0.15625, fabsf(gTheta - M_hPI))) * radiusGlobal;
 # endif
-    float f2 = CrGlobal * invDelta * uAir;
-    float f3;
+    float f2 = CrGlobal * invEta * uAir;
+    float f3 = 0.f;
 # ifdef gravity
     f3 = 0.57735026919 * (cosf(gPhi) - sinf(gPhi)) * gGlobal;
 # endif
@@ -1637,9 +1664,11 @@ __global__ void applyforcevelphiKernel
 # else
     float f4 = -u1 * v * cosf(gTheta);
 # endif
+    // van der Waals
+    float f5 = invGridLenGlobal * (WWest - WEast) * cscTheta;
         
-    at(velPhiOutput, thetaId, phiId, pitch) = (u1 * sinTheta / timeStepGlobal + f1 + f2 + f3 + f4)
-	/ (1./timeStepGlobal + CrGlobal * invDelta) / sinTheta;
+    at(velPhiOutput, thetaId, phiId, pitch) = (u1 * sinTheta / timeStepGlobal + f1 + f2 + f3 + f4 + f5)
+	/ (1./timeStepGlobal + CrGlobal * invEta) / sinTheta;
     at(velPhiDelta, thetaId, phiId) = at(velPhiOutput, thetaId, phiId, pitch) - u1;
 }
 
@@ -2340,6 +2369,7 @@ __global__ void correctThickness2(float* thicknessOutput, float* thicknessInput,
     }
     at(thicknessOutput, thetaId, phiId, pitch)
 	= clamp(at(thicknessOutput, thetaId, phiId, pitch), minVal, maxVal);
+    at(thicknessOutput, thetaId, phiId, pitch) = fmaxf(0.f, at(thicknessOutput, thetaId, phiId, pitch));
 
 
     // minVal = at(gammaInput, thetaId, phiId, pitch);
@@ -2512,6 +2542,22 @@ __global__ void correctVPhi2(float* vPhiOutput, float* vPhiInput,
 }
 
 
+__global__ void vanDerWaals(float* W, float* eta, size_t pitch) {
+    // Index
+    int splitVal = nPhiGlobal / blockDim.x;
+    int threadSequence = blockIdx.x % splitVal;
+    int phiId = threadIdx.x + threadSequence * blockDim.x;
+    int thetaId = blockIdx.x / splitVal;
+
+    float invEta = 1.f / at(eta, thetaId, phiId, pitch);
+    if (invEta <= 0.f) {
+	at(W, thetaId, phiId, pitch) = 0.f;
+    } else {
+	at(W, thetaId, phiId, pitch) = W1 * powf(invEta, 4.f) - W2 * powf(invEta, 2.f);
+    }
+}
+
+
 void KaminoSolver::bodyforce() {
     dim3 gridLayout;
     dim3 blockLayout;
@@ -2524,9 +2570,17 @@ void KaminoSolver::bodyforce() {
     checkCudaErrors(cudaDeviceSynchronize());
     
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+
+    // store van der waals forces in thickness->getGPUNextstep()
+    vanDerWaals<<<gridLayout, blockLayout>>>
+	(thickness->getGPUNextStep(), thickness->getGPUThisStep(), pitch);
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
+
     concentrationLinearSystemKernel<<<gridLayout, blockLayout>>>
     	(velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), surfConcentration->getGPUThisStep(),
-	 thickness->getGPUThisStep(), val, rhs, thickness->getThisStepPitchInElements());
+	 thickness->getGPUThisStep(), thickness->getGPUNextStep(),
+	 val, rhs, thickness->getThisStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
@@ -2540,7 +2594,30 @@ void KaminoSolver::bodyforce() {
     this->CGTime += CGtimer.stopTimer() * 0.001f;
 # endif
     
-    determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+    determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
+    applyforcevelthetaKernel<<<gridLayout, blockLayout>>>
+    	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), tmp_t, velPhi->getGPUThisStep(),
+    	 thickness->getGPUThisStep(), thickness->getGPUNextStep(),
+	 surfConcentration->getGPUNextStep(), velTheta->getNextStepPitchInElements());
+    checkCudaErrors(cudaGetLastError());
+
+    // accumulateChangesVTheta<<<gridLayout, blockLayout>>>
+    // 	(velTheta->getGPUDelta(), tmp_t, forward_t, forward_p, pitch);
+    // checkCudaErrors(cudaGetLastError());
+
+    determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
+    applyforcevelphiKernel<<<gridLayout, blockLayout>>>
+    	(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(), tmp_p, velTheta->getGPUThisStep(),
+	 thickness->getGPUThisStep(), thickness->getGPUNextStep(),
+	 surfConcentration->getGPUNextStep(), velPhi->getNextStepPitchInElements());
+    checkCudaErrors(cudaGetLastError());
+
+    // accumulateChangesVPhi<<<gridLayout, blockLayout>>>
+    // 	(velPhi->getGPUDelta(), tmp_p, forward_t, forward_p, pitch);
+    // checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
+
+   determineLayout(gridLayout, blockLayout, nTheta, nPhi);
     divergenceKernel_fromGamma<<<gridLayout, blockLayout>>>
     	(div, surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
     	 surfConcentration->getNextStepPitchInElements());
@@ -2585,36 +2662,6 @@ void KaminoSolver::bodyforce() {
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
     }
-
-    determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
-    applyforcevelthetaKernel<<<gridLayout, blockLayout>>>
-    	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), tmp_t, velPhi->getGPUThisStep(),
-    	 thickness->getGPUThisStep(), surfConcentration->getGPUNextStep(), velTheta->getNextStepPitchInElements());
-    checkCudaErrors(cudaGetLastError());
-    
-    // accumulateChangesVTheta<<<gridLayout, blockLayout>>>
-    // 	(velTheta->getGPUDelta(), tmp_t, forward_t, forward_p, pitch);
-    // checkCudaErrors(cudaGetLastError());
-	
-    determineLayout(gridLayout, blockLayout, velPhi->getNTheta(), velPhi->getNPhi());
-    applyforcevelphiKernel<<<gridLayout, blockLayout>>>
-    	(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(), tmp_p, velTheta->getGPUThisStep(),
-	 thickness->getGPUThisStep(), surfConcentration->getGPUNextStep(), velPhi->getNextStepPitchInElements());
-    checkCudaErrors(cudaGetLastError());
-    
-    // accumulateChangesVPhi<<<gridLayout, blockLayout>>>
-    // 	(velPhi->getGPUDelta(), tmp_p, forward_t, forward_p, pitch);
-    // checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
-
-
-    // printGPUarraytoMATLAB<float>("dgamma.txt", surfConcentration->getGPUDelta(),
-    // 				 nTheta, nPhi, pitch);
-    // printGPUarraytoMATLAB<float>("gamma.txt", surfConcentration->getGPUNextStep(),
-    // 				 nTheta, nPhi, pitch);
-
-    // printGPUarraytoMATLAB<float>("deta.txt", thickness->getGPUDelta(),
-    // 				 nTheta, nPhi, pitch);
 
     if (particleDensity > 0) std::swap(particles->tempVal, particles->value);
     thickness->swapGPUBuffer();
@@ -3086,6 +3133,11 @@ void Kamino::run()
     float eva = evaporation * radius / (H * U);
     checkCudaErrors(cudaMemcpyToSymbol(evaporationRate, &eva, sizeof(float)));
 # endif
+    float epsilon_ = 1.f;
+    float W2_ = radius / (U * U) * pow(rm / H, 2) * epsilon_;
+    float W1_ = 0.5f * W2_ * pow(rm / H, 2);
+    checkCudaErrors(cudaMemcpyToSymbol(W1, &W1_, sizeof(float)));
+    checkCudaErrors(cudaMemcpyToSymbol(W2, &W2_, sizeof(float)));
 
     solver.initThicknessfromPic(thicknessImage);
 
