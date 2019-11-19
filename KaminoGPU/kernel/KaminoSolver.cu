@@ -171,12 +171,12 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
 
 
     /* AMGX */
-    int devices[] = {0};
+    int devices[] = {device};
     const char *AMGconfigFile = AMGconfig.c_str();
     AMGX_initialize();
     AMGX_initialize_plugins();
     AMGX_config_create_from_file(&cfg, AMGconfigFile);
-    AMGX_resources_create_simple(&res, cfg);
+    AMGX_resources_create(&res, cfg, NULL, 1, devices);
     mode = AMGX_mode_dFFI;
     AMGX_matrix_create(&A, res, mode);
     AMGX_vector_create(&b, res, mode);
