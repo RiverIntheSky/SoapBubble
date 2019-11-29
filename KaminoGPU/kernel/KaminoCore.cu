@@ -899,13 +899,12 @@ __global__ void advectionCenteredBimocq
     // Coord in scalar space
     float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
 
-    // if (thetaId < float(nThetaGlobal) / 16.f || thetaId > float(nThetaGlobal) * 15.f / 16.f) {
-    // 	float2 traceId = traceRK3(velTheta, velPhi, timeStepGlobal, gId, pitch);
-    // 	at(thicknessOutput, thetaId, phiId, pitch)
-    // 	= sampleCentered(thicknessInput, traceId, pitch);
-    // } else {
+    if (thetaId < 0.0625f * float(nThetaGlobal) || thetaId > 0.9375f * float(nThetaGlobal)) {
+    	float2 traceId = traceRK3(velTheta, velPhi, timeStepGlobal, gId, pitch);
+    	at(thicknessOutput, thetaId, phiId, pitch)
+    	    = sampleCentered(thicknessInput, traceId, pitch);
+    } else {
 	float thickness = 0.f;
-	//    float gamma = 0.f;
 	for (int i = 0; i < 5; i++) {
 	    float2 posId = gId + dir[i];
 	    float2 initPosId = sampleMapping(bwd_t, bwd_p, posId);
@@ -915,12 +914,9 @@ __global__ void advectionCenteredBimocq
 						       sampleCentered(thicknessDeltaLast, lastPosId, pitch)); 
 	    thickness += blend_coeff * w[i] * (sampleCentered(thicknessInit, initPosId, pitch) +
 					       sampleCentered(thicknessDelta, initPosId, pitch));
-	    // gamma += w[i] * (sampleCentered(gammaInit, initPosId, pitch) +
-	    //	 sampleCentered(gammaDelta, initPosId, pitch));
 	}
 	at(thicknessOutput, thetaId, phiId, pitch) = thickness;
-	// gammaOutput[thetaId * pitch + phiId] = gamma;
-	//    }
+    }
 }
 
 
@@ -1106,7 +1102,7 @@ float KaminoSolver::estimateDistortion() {
 	(backward_t, backward_p, forward_t, forward_p, tmp_p);
     CHECK_CUDA(cudaDeviceSynchronize());
     CHECK_CUDA(cudaGetLastError());
-    std::cout << "max sampling backward " << maxAbs(tmp_t, nTheta, nPhi) << " max sampling forward " << maxAbs(tmp_p, nTheta, nPhi) << std::endl;
+
     return max(maxAbs(tmp_t, nTheta, nPhi), maxAbs(tmp_p, nTheta, nPhi));
 }
 
@@ -1177,8 +1173,8 @@ void KaminoSolver::advection()
 	    checkCudaErrors(cudaGetLastError());
  
 	    advectionCentered<<<gridLayout, blockLayout>>>
-		(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
-		 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), pitch);
+	    	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
+	    	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), pitch);
 
 	} else {
 	    advectionAllCentered<<<gridLayout, blockLayout>>>
@@ -1188,29 +1184,6 @@ void KaminoSolver::advection()
 	}
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
-
-	// error correction
-	if (useBimocq) {
-	    // correctBimocq1<<<gridLayout, blockLayout>>>
-	    //     (thickness->getGPUThisStep(), tmp_t, thickness->getGPUDelta(), thickness->getGPUInit(),
-	    //      forward_t, forward_p, pitch);
-	    // checkCudaErrors(cudaGetLastError());
-	    // checkCudaErrors(cudaDeviceSynchronize());
-
-	    // CHECK_CUDA(cudaMemcpy(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
-	    // 			  thickness->getNTheta() * pitch * sizeof(float),
-	    // 			  cudaMemcpyDeviceToDevice));
-	    // CHECK_CUDA(cudaMemcpy(surfConcentration->getGPUNextStep(),
-	    // 		      surfConcentration->getGPUThisStep(),
-	    // 		      surfConcentration->getNTheta() * pitch * sizeof(float),
-	    // 		      cudaMemcpyDeviceToDevice));
-
-	    // correctBimocq2<<<gridLayout, blockLayout>>>
-	    //     (thickness->getGPUNextStep(), thickness->getGPUThisStep(), tmp_t,
-	    //      backward_t, backward_p, pitch);
-	    // checkCudaErrors(cudaGetLastError());
-	    // checkCudaErrors(cudaDeviceSynchronize());
-	}
     }
     
     if (particleDensity > 0) {
@@ -1438,9 +1411,9 @@ __global__ void concentrationLinearSystemKernel
     // 	 sinThetaNorth * sinThetaNorth / (invDt + CrGlobal / etaUp));
     sinThetaDiv += 0.57735026919 * gGlobal * invGridLenGlobal *
     	((cosf(gPhi + halfStep) - sinf(gPhi + halfStep)) * etaRight
-	 / (invDt * etaRight + CrGlobal) -
+    	 / (invDt * etaRight + CrGlobal) -
     	 (cosf(gPhi - halfStep) - sinf(gPhi - halfStep)) * etaLeft
-	 / (invDt * etaLeft + CrGlobal) +
+    	 / (invDt * etaLeft + CrGlobal) +
     	 (cosf(gTheta + halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaSouth)
     	 / (invDt * etaDown + CrGlobal) * sinThetaSouth * etaDown -
     	 (cosf(gTheta - halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaNorth)
@@ -1538,8 +1511,8 @@ void KaminoSolver::AlgebraicMultiGridCG() {
     int num_iter;
     AMGX_solver_get_iterations_number(solver, &num_iter);
     std::cout <<  "Total Iterations:  " << num_iter << std::endl;
-    if (num_iter > 100)
-	setBroken(true);
+    // if (num_iter > 100)
+    // 	setBroken(true);
 }
 
 __global__ void applyforcevelthetaKernel
@@ -1651,8 +1624,8 @@ __global__ void applyforcevelphiKernel
     // uAir = 20.f * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * (M_hPI - gTheta)
     // 	* expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal
     // 	* cosf(gPhi) / UGlobal;
-    uAir = 2.f * (1.f - smoothstep(0.f, 10.f, currentTimeGlobal)) / UGlobal * sinTheta
-	* (1.f - smoothstep(M_PI * 0.09375, M_PI * 0.15625, fabsf(gTheta - M_hPI))) * radiusGlobal;
+    uAir = 5.f * (1.f - smoothstep(0.f, 10.f, currentTimeGlobal)) / UGlobal * sinTheta
+	* (1.f - smoothstep(M_PI * 0.25, M_PI * 0.3125, fabsf(gTheta - M_hPI))) * radiusGlobal;
 # endif
     float f2 = CrGlobal * invEta * uAir;
     float f3 = 0.f;
@@ -2114,9 +2087,6 @@ __global__ void accumulateChangesThickness(float* thicknessDelta, float* thickne
     for(int i = 0; i < 5; i++) {
 	float2 posId = gId + dir[i];
 	float2 initPosId = sampleMapping(fwd_t, fwd_p, posId);
-	
-	// at(gammaDelta, thetaId, phiId, pitch)
-	//     += w[i] * sampleCentered(gammaDeltaTemp, initPosId, nPhiGlobal);
 	at(thicknessDelta, thetaId, phiId, pitch)
 	    += w[i] * sampleCentered(thicknessDeltaTemp, initPosId, nPhiGlobal);
     }
@@ -2341,8 +2311,8 @@ __global__ void correctThickness2(float* thicknessOutput, float* thicknessInput,
     float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
 
     // sample
-    // if (thetaId < float(nThetaGlobal) / 16.f || thetaId > float(nThetaGlobal) * 15.f / 16.f)
-    // 	return;
+    if (thetaId < 0.0625f * float(nThetaGlobal) || thetaId > 0.9375f * float(nThetaGlobal))
+    	return;
     
     for (int i = 0; i < 5; i++) {
 	float2 posId = gId + dir[i];
@@ -3101,8 +3071,10 @@ Kamino::Kamino(float radius, float H, float U, float c_m, float Gamma_m,
     boost::filesystem::create_directories(outputDir);
     if (outputDir.back() != '/')
 	this->outputDir.append("/");
+    boost::filesystem::copy_file("../configKamino.txt", this->outputDir + "config.txt",
+				 boost::filesystem::copy_option::overwrite_if_exists);
+
     std::cout << "Re^-1 " << re << std::endl;
-    std::cout << "S " << S << std::endl;
     std::cout << "Cr " << Cr << std::endl;
     std::cout << "M " << M << std::endl;
     std::cout << "AMG config file: " << AMGconfig << std::endl;

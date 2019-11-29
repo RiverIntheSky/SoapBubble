@@ -90,7 +90,7 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
 
     cudaDeviceProp deviceProp;
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, device));
-    this->nThreadxMax = deviceProp.maxThreadsDim[0];
+    this->nThreadxMax = std::min(deviceProp.maxThreadsDim[0], 128);
 
     checkCudaErrors(cudaMalloc((void **)(&div),
 			       sizeof(float) * N));
@@ -121,7 +121,7 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
     initWithConst(this->velPhi, 0.0);
     initWithConst(this->velTheta, 0.0);
     // initialize_velocity();
-    initWithConst(this->thickness, 1.0);
+    initWithConst(this->thickness, 0.5);
     initWithConst(this->surfConcentration, 1.0);
 
     dim3 gridLayout;
@@ -435,11 +435,10 @@ void KaminoSolver::stepForward() {
     this->timeElapsed += this->timeStep;
 
     float distortion = estimateDistortion();
-        
     std::cout << "max distortion " << distortion << std::endl;
-    if (distortion > nTheta / 128.f) {
+
+    if (distortion > nTheta / 128.f)
     	reInitializeMapping();
-    }
 }
 
 
@@ -498,12 +497,12 @@ void KaminoSolver::setBroken(bool broken) {
 void KaminoSolver::initThicknessfromPic(std::string path)
 {
     if (path == "") {
-	std::cout << "No thickness image provided, initialize with eta = 1." << std::endl;
+	std::cout << "No thickness image provided, initialize with eta = 0.5" << std::endl;
     } else {
 	cv::Mat image_In, image_Flipped;
 	image_In = cv::imread(path, cv::IMREAD_UNCHANGED);
 	if (!image_In.data) {
-	    std::cout << "No thickness image provided, initialize with eta = 1." << std::endl;
+	    std::cout << "No thickness image provided, initialize with eta = 0.5" << std::endl;
 	} else {
 	    cv::Mat image_Resized;
 	    cv::flip(image_In, image_Flipped, 1);
@@ -753,6 +752,8 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
     mat_string.append(".txt");
 
     std::ofstream of(mat_string);
+    std::ofstream thick;
+    thick.open("thickness.txt", std::ofstream::out | std::ofstream::app);
 
     //    if (frame != 0) {
     // if (false) {
@@ -809,6 +810,9 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 	images[1].resize(nPhi * nTheta);
 	images[2].resize(nPhi * nTheta);
 
+	float minE = 1.f;
+	float ratio = 2e5; // * 10
+
 	for (size_t j = 0; j < nTheta; ++j) {
 	    for (size_t i = 0; i < nPhi; ++i) {
 		float Delta = thickness->getCPUValueAt(i, j);
@@ -816,16 +820,21 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 		    this->setBroken(true);
 		}    //		    return;
 		//} else {
-		images[0][j*nPhi+i] = Delta * this->H * 5e5;
-		images[1][j*nPhi+i] = Delta * this->H * 5e5;
-		images[2][j*nPhi+i] = Delta * this->H * 5e5; // * 4
+		if (Delta < minE)
+		    minE = Delta;
+		images[0][j*nPhi+i] = Delta * this->H * ratio;
+		images[1][j*nPhi+i] = Delta * this->H * ratio;
+		images[2][j*nPhi+i] = Delta * this->H * ratio; 
 		of << Delta * this->H * 2 << " ";
 		//}
 	    }
 	    of << std::endl;
 	}
+	thick << minE << std::endl;
+	thick.close();
 
 	write_image(img_string, nPhi, nTheta, images);
+	std::cout << "min thickness " << minE << std::endl;
     }    
 }
 
@@ -833,4 +842,3 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 float KaminoSolver::getGridLen() {
     return this->gridLen;
 }
-    

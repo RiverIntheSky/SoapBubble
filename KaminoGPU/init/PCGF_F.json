@@ -24,7 +24,7 @@
         "solver": "PCGF", 
         "print_solve_stats": 0, 
         "obtain_timings": 0, 
-        "max_iters": 100, 
+        "max_iters": 1000, 
         "monitor_residual": 1, 
         "convergence": "ABSOLUTE", 
         "scope": "main", 
