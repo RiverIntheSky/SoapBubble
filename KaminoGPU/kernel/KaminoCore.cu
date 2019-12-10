@@ -912,19 +912,19 @@ __global__ void advectionCenteredBimocq
     // 	at(thicknessOutput, thetaId, phiId, pitch)
     // 	    = sampleCentered(thicknessInput, traceId, pitch);
     // } else {
-	float thickness = 0.f;
-	for (int i = 0; i < 5; i++) {
-	    float2 posId = gId + dir[i];
-	    float2 initPosId = sampleMapping(bwd_t, bwd_p, posId);
-	    float2 lastPosId = sampleMapping(bwd_tprev, bwd_pprev, initPosId);
-	    thickness += (1.f - blend_coeff) * w[i] * (sampleCentered(thicknessInitLast, lastPosId, pitch) +
-						       sampleCentered(thicknessDelta, initPosId, pitch) +
-						       sampleCentered(thicknessDeltaLast, lastPosId, pitch)); 
-	    thickness += blend_coeff * w[i] * (sampleCentered(thicknessInit, initPosId, pitch) +
-					       sampleCentered(thicknessDelta, initPosId, pitch));
-	}
-	at(thicknessOutput, thetaId, phiId, pitch) = thickness;
+    float thickness = 0.f;
+    for (int i = 0; i < 5; i++) {
+	float2 posId = gId + dir[i];
+	float2 initPosId = sampleMapping(bwd_t, bwd_p, posId);
+	float2 lastPosId = sampleMapping(bwd_tprev, bwd_pprev, initPosId);
+	thickness += (1.f - blend_coeff) * w[i] * (sampleCentered(thicknessInitLast, lastPosId, pitch) +
+						   sampleCentered(thicknessDelta, initPosId, pitch) +
+						   sampleCentered(thicknessDeltaLast, lastPosId, pitch)); 
+	thickness += blend_coeff * w[i] * (sampleCentered(thicknessInit, initPosId, pitch) +
+					   sampleCentered(thicknessDelta, initPosId, pitch));
     }
+    at(thicknessOutput, thetaId, phiId, pitch) = thickness;
+    // }
 }
 
 
