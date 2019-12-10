@@ -4,6 +4,7 @@
 # include "../include/KaminoGPU.cuh"
 # include "../include/KaminoQuantity.cuh"
 # include "../include/KaminoParticles.cuh"
+# include <iomanip>
 
 extern __constant__ float invGridLenGlobal;
 
@@ -208,13 +209,15 @@ public:
 
 template <typename T>
 void KaminoSolver::printGPUarray(std::string repr, T* vec, int len) {
-    T cpuvec[len];
+    T* cpuvec = new T[len];
     CHECK_CUDA(cudaMemcpy(cpuvec, vec, len * sizeof(T),
 			  cudaMemcpyDeviceToHost));
     std::cout << repr << std::endl;
     for (int i = 0; i < len; i++)
 	std::cout << cpuvec[i] << " ";
     std::cout << std::endl;
+
+    delete cpuvec;
 }
 
 
@@ -223,7 +226,7 @@ void KaminoSolver::printGPUarraytoMATLAB(std::string filename, T* vec, int num_r
 					 int num_col, size_t pitch) {
     std::ofstream of(filename);
     int len = num_row * num_col;
-    T cpuvec[len];
+    T* cpuvec = new T[len];
 
     CHECK_CUDA(cudaMemcpy2D(cpuvec, num_col * sizeof(T), vec,
 			    pitch * sizeof(T),
@@ -232,8 +235,10 @@ void KaminoSolver::printGPUarraytoMATLAB(std::string filename, T* vec, int num_r
 
     for (int row = 0; row < num_row; row++) {
 	for (int col = 0; col < num_col; col++) {
-	    of << cpuvec[row * num_col + col] << " ";
+	    of << std::setprecision(10) << cpuvec[row * num_col + col] << " ";
 	}
 	of << "\n";
     }
+
+    delete cpuvec;
 }
