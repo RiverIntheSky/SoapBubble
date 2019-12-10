@@ -3,8 +3,6 @@
 # include "../include/KaminoTimer.cuh"
 # include "../include/tinyexr.h"
 
-// CONSTRUCTOR / DESTRUCTOR >>>>>>>>>>
-
 const int fftRank = 1;
 static const int m = 3;
 static __constant__ size_t nPhiGlobal;
@@ -27,10 +25,11 @@ __global__ void initParticleValues(float* particleVal, float* particleCoord, flo
 
 __global__ void initMapping(float* map_theta, float* map_phi){
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     map_theta[thetaId * nPhiGlobal + phiId] = (float)thetaId + centeredThetaOffset;
     map_phi[thetaId * nPhiGlobal + phiId] = (float)phiId + centeredPhiOffset;
@@ -437,7 +436,7 @@ void KaminoSolver::stepForward() {
     float distortion = estimateDistortion();
     std::cout << "max distortion " << distortion << std::endl;
 
-    if (distortion > nTheta / 128.f)
+    if (distortion > 2.f)
     	reInitializeMapping();
 }
 

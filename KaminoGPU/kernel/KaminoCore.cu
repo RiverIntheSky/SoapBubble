@@ -532,10 +532,11 @@ __global__ void	updateMappingKernel(float* velTheta, float* velPhi, float dt,
 				     float* map_t, float* map_p,
 				     float* tmp_t, float* tmp_p, size_t pitch){
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     float2 pos = make_float2((float)thetaId, (float)phiId) + centeredOffset;
 
@@ -557,10 +558,11 @@ __global__ void advectionVSpherePhiKernel
 (float* velPhiOutput, float* velPhiInput, float* velThetaInput, size_t pitch)
 {
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
     
     // Coord in phi space
     float2 gId = make_float2((float)thetaId, (float)phiId) + vPhiOffset;
@@ -658,10 +660,11 @@ __global__ void advectionVSphereThetaKernel
 (float* velThetaOutput, float* velPhiInput, float* velThetaInput, size_t pitch)
 {
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     // Coord in theta space
     float2 gId = make_float2((float)thetaId, (float)phiId) + vThetaOffset;
@@ -760,10 +763,11 @@ __global__ void advectionVPhiKernel
 (float* attributeOutput, float* velPhi, float* velTheta, size_t pitch)
 {
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
     
     // Coord in vel phi space
     float2 gId = make_float2((float)thetaId, (float)phiId) + vPhiOffset;
@@ -786,10 +790,11 @@ __global__ void advectionVThetaKernel
 (float* attributeOutput, float* velPhi, float* velTheta, size_t pitch)
 {
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
     
     // Coord in vel theta space
     float2 gId = make_float2((float)thetaId, (float)phiId) + vThetaOffset;
@@ -811,10 +816,11 @@ __global__ void advectionCentered
 (float* attributeOutput, float* attributeInput, float* velPhi, float* velTheta, size_t pitch)
 {
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
     
     // Coord in scalar space
     float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
@@ -838,10 +844,11 @@ __global__ void advectionAllCentered
  float* velPhi, float* velTheta, size_t pitch)
 {
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
     
     // Coord in scalar space
     float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
@@ -891,19 +898,20 @@ __global__ void advectionCenteredBimocq
 		     make_float2(0.f, 0.f)};
 
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     // Coord in scalar space
     float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
 
-    if (thetaId < 0.0625f * float(nThetaGlobal) || thetaId > 0.9375f * float(nThetaGlobal)) {
-    	float2 traceId = traceRK3(velTheta, velPhi, timeStepGlobal, gId, pitch);
-    	at(thicknessOutput, thetaId, phiId, pitch)
-    	    = sampleCentered(thicknessInput, traceId, pitch);
-    } else {
+    // if (thetaId < 0.0625f * float(nThetaGlobal) || thetaId > 0.9375f * float(nThetaGlobal)) {
+    // 	float2 traceId = traceRK3(velTheta, velPhi, timeStepGlobal, gId, pitch);
+    // 	at(thicknessOutput, thetaId, phiId, pitch)
+    // 	    = sampleCentered(thicknessInput, traceId, pitch);
+    // } else {
 	float thickness = 0.f;
 	for (int i = 0; i < 5; i++) {
 	    float2 posId = gId + dir[i];
@@ -931,10 +939,11 @@ __global__ void advectionVThetaBimocq
 		     make_float2(0.f, 0.f)};
 
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     // Coord in velTheta space
     float2 gId = make_float2((float)thetaId, (float)phiId) + vThetaOffset;
@@ -966,10 +975,11 @@ __global__ void advectionVPhiBimocq
 		     make_float2(0.f, 0.f)};
 
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     // Coord in uPhi space
     float2 gId = make_float2((float)thetaId, (float)phiId) + vPhiOffset;
@@ -1071,11 +1081,12 @@ void KaminoSolver::updateCFL(){
 __global__ void estimateDistortionKernel(float* map1_t, float* map1_p,
 					 float* map2_t, float* map2_p, float* result) {
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
-    
+    if (phiId >= nPhiGlobal) return;
+
     int2 Id = make_int2(thetaId, phiId);
     
     // Coord in scalar space
@@ -1114,7 +1125,7 @@ void KaminoSolver::advection()
     dim3 gridLayout;
     dim3 blockLayout;
     
-    // Advect Theta
+    // Advect velTheta
     determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
     // if (useBimocq) {
     // 	advectionVThetaBimocq<<<gridLayout, blockLayout>>>
@@ -1201,10 +1212,11 @@ __global__ void divergenceKernel
 (float* div, float* velPhi, float* velTheta,
  size_t velPhiPitchInElements, size_t velThetaPitchInElements)
 {
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     float thetaCoord = ((float)thetaId + centeredThetaOffset) * gridLenGlobal;
 
@@ -1263,10 +1275,11 @@ __global__ void divergenceKernel
 __global__ void divergenceKernel_fromGamma(float* div, float* gammaNext, float* gammaThis,
 					   size_t pitch) {
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     float gamma_a = gammaThis[thetaId * pitch + phiId];
     float gamma = gammaNext[thetaId * pitch + phiId];
@@ -1279,10 +1292,11 @@ __global__ void concentrationLinearSystemKernel
 (float* velPhi_a, float* velTheta_a, float* gamma_a, float* eta_a,
  float* W, float* val, float* rhs, size_t pitch) {
     // TODO: pre-compute eta???
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
     int idx = thetaId * nPhiGlobal + phiId;
     int idx5 = 5 * idx;
 
@@ -1518,10 +1532,11 @@ void KaminoSolver::AlgebraicMultiGridCG() {
 __global__ void applyforcevelthetaKernel
 (float* velThetaOutput, float* velThetaInput, float* velThetaDelta, float* velPhi,
  float* thickness, float* W, float* concentration, size_t pitch) {
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
 # ifdef sphere
     float gTheta = ((float)thetaId + vThetaThetaOffset) * gridLenGlobal;
@@ -1582,10 +1597,11 @@ __global__ void applyforcevelthetaKernel
 __global__ void applyforcevelphiKernel
 (float* velPhiOutput, float* velPhiInput, float* velPhiDelta, float* velTheta,
  float* thickness, float* W, float* concentration, size_t pitch) {
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
 # ifdef sphere
     // Coord in phi-theta space
@@ -1624,8 +1640,8 @@ __global__ void applyforcevelphiKernel
     // uAir = 20.f * (1 - smoothstep(0.f, 10.f, currentTimeGlobal)) * (M_hPI - gTheta)
     // 	* expf(-10 * powf(fabsf(gTheta - M_hPI), 2.f)) * radiusGlobal
     // 	* cosf(gPhi) / UGlobal;
-    uAir = 5.f * (1.f - smoothstep(0.f, 10.f, currentTimeGlobal)) / UGlobal * sinTheta
-	* (1.f - smoothstep(M_PI * 0.25, M_PI * 0.3125, fabsf(gTheta - M_hPI))) * radiusGlobal;
+    uAir = 5.f * (1.f - smoothstep(0.f, 4.f, currentTimeGlobal)) / UGlobal * sinTheta
+	* (1.f - smoothstep(M_PI * 0.15, M_PI * 0.2, fabsf(gTheta - M_hPI))) * radiusGlobal;
 # endif
     float f2 = CrGlobal * invEta * uAir;
     float f3 = 0.f;
@@ -1984,10 +2000,11 @@ __global__ void applyforceThickness
  float* div, size_t pitch)
 {
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     float eta = at(thicknessInput, thetaId, phiId, pitch);
     float f = at(div, thetaId, phiId);
@@ -2056,10 +2073,11 @@ __global__ void applyforceThickness
  * b and c are pitched memory
  */
 __global__ void substractPitched(float* a, float* b, float* c, size_t pitch) {
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     at(a, thetaId, phiId) = at(b, thetaId, phiId, pitch) - at(c, thetaId, phiId, pitch);
 }
@@ -2076,10 +2094,11 @@ __global__ void accumulateChangesThickness(float* thicknessDelta, float* thickne
 		     make_float2(0.f, 0.f)};
 
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
     
     // Coord in scalar space
     float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
@@ -2104,10 +2123,11 @@ __global__ void accumulateChangesVTheta(float* vThetaDelta, float* vThetaDeltaTe
 		     make_float2(0.f, 0.f)};
 
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
     
     // Coord in vTheta space
     float2 gId = make_float2((float)thetaId, (float)phiId) + vThetaOffset;
@@ -2132,10 +2152,11 @@ __global__ void accumulateChangesVPhi(float* vPhiDelta, float* vPhiDeltaTemp,
 		     make_float2(0.f, 0.f)};
 
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
     
     // Coord in vPhi space
     float2 gId = make_float2((float)thetaId, (float)phiId) + vPhiOffset;
@@ -2230,10 +2251,11 @@ __global__ void normalizeThickness
 (fReal* thicknessOutput, fReal* thicknessInput, fReal* velPhi, fReal* velTheta,
  fReal* div, float2* weight, size_t pitch) {
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     float2* currentWeight = weight + (thetaId * nPhiGlobal + phiId);
     fReal w = currentWeight->x;
@@ -2269,10 +2291,11 @@ __global__ void correctThickness1(float* thicknessCurr, float* thicknessError, f
 		     make_float2(0.f, 0.f)};
 
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     float thickness = 0.f;
     // float gamma = 0.f;
@@ -2302,17 +2325,18 @@ __global__ void correctThickness2(float* thicknessOutput, float* thicknessInput,
 		     make_float2(0.f, 0.f)};
 
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     // Coord in scalar space
     float2 gId = make_float2((float)thetaId, (float)phiId) + centeredOffset;
 
     // sample
-    if (thetaId < 0.0625f * float(nThetaGlobal) || thetaId > 0.9375f * float(nThetaGlobal))
-    	return;
+    // if (thetaId < 0.0625f * float(nThetaGlobal) || thetaId > 0.9375f * float(nThetaGlobal))
+    // 	return;
     
     for (int i = 0; i < 5; i++) {
 	float2 posId = gId + dir[i];
@@ -2368,10 +2392,11 @@ __global__ void correctVTheta1(float* vThetaCurr, float* vThetaError, float* vTh
 		     make_float2(0.f, 0.f)};
 
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     float vTheta = 0.f;
 
@@ -2397,10 +2422,11 @@ __global__ void correctVTheta2(float* vThetaOutput, float* vThetaInput,
 		     make_float2(0.f, 0.f)};
 
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     // Coord in scalar space
     float2 gId = make_float2((float)thetaId, (float)phiId) + vThetaOffset;
@@ -2445,10 +2471,11 @@ __global__ void correctVPhi1(float* vPhiCurr, float* vPhiError, float* vPhiDelta
 		     make_float2(0.f, 0.f)};
 
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     float vPhi = 0.f;
 
@@ -2474,10 +2501,11 @@ __global__ void correctVPhi2(float* vPhiOutput, float* vPhiInput,
 		     make_float2(0.f, 0.f)};
 
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     // Coord in scalar space
     float2 gId = make_float2((float)thetaId, (float)phiId) + vPhiOffset;
@@ -2514,10 +2542,11 @@ __global__ void correctVPhi2(float* vPhiOutput, float* vPhiInput,
 
 __global__ void vanDerWaals(float* W, float* eta, size_t pitch) {
     // Index
-    int splitVal = nPhiGlobal / blockDim.x;
+    int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
+    if (phiId >= nPhiGlobal) return;
 
     float invEta = 1.f / at(eta, thetaId, phiId, pitch);
     if (invEta <= 0.f) {
@@ -3077,6 +3106,8 @@ Kamino::Kamino(float radius, float H, float U, float c_m, float Gamma_m,
     std::cout << "Re^-1 " << re << std::endl;
     std::cout << "Cr " << Cr << std::endl;
     std::cout << "M " << M << std::endl;
+    std::cout << "S " << S << std::endl;
+    std::cout << "epsilon " << epsilon << std::endl;
     std::cout << "AMG config file: " << AMGconfig << std::endl;
 }
 Kamino::~Kamino()
