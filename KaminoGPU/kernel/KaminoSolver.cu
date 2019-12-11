@@ -130,7 +130,17 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
     initLinearSystem<<<gridLayout, blockLayout>>>(row_ptr, col_ind);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
-    
+
+    /* AMGCL */
+    ptr.resize(N + 1);
+    col.resize(nz);
+    val_cpu.resize(nz);
+    rhs_cpu.resize(N);
+    xx.resize(N);
+
+    CHECK_CUDA(cudaMemcpy(ptr.data(), row_ptr, sizeof(int) * (N + 1), cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(col.data(), col_ind, sizeof(int) * nz, cudaMemcpyDeviceToHost));
+
     // printGPUarraytoMATLAB<int>("test/row_ptr.txt", row_ptr, N + 1, 1, 1);
     // printGPUarraytoMATLAB<int>("test/col_ind.txt", col_ind, N, 5, 5);
     
@@ -267,6 +277,7 @@ KaminoSolver::~KaminoSolver()
     float totalTimeUsed = this->advectionTime + this->bodyforceTime;
     std::cout << "Total time used for advection : " << this->advectionTime << std::endl;
     std::cout << "Total time used for body force : " << this->bodyforceTime << std::endl;
+    std::cout << "Total time used for CG : " << CGTime << std::endl;
     std::cout << "Percentage of advection : " << advectionTime / totalTimeUsed * 100.0f << "%" << std::endl;
     std::cout << "Percentage of bodyforce : " << bodyforceTime / totalTimeUsed * 100.0f << "%" << std::endl;
     std::cout << "Percentage of CG / bodyforce : " << CGTime / bodyforceTime * 100.0f << "%" << std::endl;

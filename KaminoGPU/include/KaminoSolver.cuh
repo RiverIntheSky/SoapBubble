@@ -135,6 +135,10 @@ private:
     //status handling
     AMGX_SOLVE_STATUS status;
 
+    /* AMGCL */
+    std::vector<int> ptr, col;
+    std::vector<float> val_cpu, rhs_cpu, xx;
+
     /* Bimocq mapping buffers */
     float *forward_p, *forward_t,
 	*backward_p, *backward_t,
@@ -147,6 +151,7 @@ private:
     void bodyforce();
     void conjugateGradient();
     void AlgebraicMultiGridCG();
+    void AMGCLSolve();
 
     // Swap all these buffers of the attributes.
     void swapVelocityBuffers();

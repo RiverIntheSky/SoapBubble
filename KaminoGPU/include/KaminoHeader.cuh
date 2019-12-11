@@ -53,7 +53,6 @@ typedef cufftComplex ComplexFourier;
 
 const size_t byte2Bits = 8;
 
-const fReal density = 1000.0;
 const fReal uSolid = 0.0;
 const fReal vSolid = 0.0;
 const fReal R = 8.3144598;              // gas constant. J mol^-1 K^-1

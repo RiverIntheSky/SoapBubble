@@ -5,6 +5,16 @@
 # include "ceres/ceres.h"
 # include "utils.h"
 
+# include <amgcl/make_solver.hpp>
+# include <amgcl/profiler.hpp>
+# include <amgcl/solver/bicgstab.hpp>
+# include <amgcl/amg.hpp>
+# include <amgcl/backend/cuda.hpp>
+# include <amgcl/relaxation/cusparse_ilu0.hpp>
+# include <amgcl/coarsening/smoothed_aggregation.hpp>
+# include <amgcl/relaxation/spai0.hpp>
+# include <amgcl/adapter/crs_tuple.hpp>
+
 __constant__ float invGridLenGlobal;
 static __constant__ size_t nPhiGlobal;
 static __constant__ size_t nThetaGlobal;
@@ -29,6 +39,19 @@ static __constant__ float W2;
 # define eps 1e-5f
 # define MAX_BLOCK_SIZE 1024
 
+namespace amgcl {
+    profiler<> prof("v2");
+}
+
+typedef amgcl::backend::cuda<float> Backend;
+typedef amgcl::make_solver<
+  amgcl::amg<
+    Backend,
+	amgcl::coarsening::smoothed_aggregation,
+	amgcl::relaxation::spai0
+	>,
+      amgcl::solver::bicgstab<Backend>
+      > AMGCLSolver;
 
 /**
  * query value at coordinate
@@ -1297,6 +1320,7 @@ __global__ void concentrationLinearSystemKernel
     int phiId = threadIdx.x + threadSequence * blockDim.x;
     int thetaId = blockIdx.x / splitVal;
     if (phiId >= nPhiGlobal) return;
+
     int idx = thetaId * nPhiGlobal + phiId;
     int idx5 = 5 * idx;
 
@@ -1527,6 +1551,42 @@ void KaminoSolver::AlgebraicMultiGridCG() {
     std::cout <<  "Total Iterations:  " << num_iter << std::endl;
     // if (num_iter > 100)
     // 	setBroken(true);
+}
+
+void KaminoSolver::AMGCLSolve() {
+    // copy data to CPU
+    CHECK_CUDA(cudaMemcpy2D(xx.data(), nPhi * sizeof(float), surfConcentration->getGPUThisStep(),
+			    surfConcentration->getThisStepPitchInElements() * sizeof(float),
+			    nPhi * sizeof(float), nTheta,
+			    cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(rhs_cpu.data(), rhs, sizeof(float) * N, cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(val_cpu.data(), val, sizeof(float) * nz, cudaMemcpyDeviceToHost));
+
+    // setup AMGCL
+    AMGCLSolver::params sprm;
+    sprm.solver.tol = 1e-6;
+    Backend::params bprm;
+    cusparseCreate(&bprm.cusparse_handle);
+
+    AMGCLSolver solve(std::tie(N, ptr, col, val_cpu), sprm, bprm);
+
+    auto f_b = Backend::copy_vector(rhs_cpu, bprm);
+    auto x_b = Backend::copy_vector(xx, bprm);
+
+    int    iters;
+    double error;
+
+    std::tie(iters, error) = solve(*f_b, *x_b);
+
+    std::cout << "Iterations: " << iters << std::endl
+              << "Error:      " << error << std::endl;
+
+    // copy data back to GPU
+    CHECK_CUDA(cudaMemcpy2D(surfConcentration->getGPUNextStep(),
+			    surfConcentration->getNextStepPitchInElements() * sizeof(float),
+			    thrust::raw_pointer_cast(x_b->data()), nPhi * sizeof(float), nPhi * sizeof(float),
+			    nTheta, cudaMemcpyHostToDevice));
+
 }
 
 __global__ void applyforcevelthetaKernel
@@ -2587,8 +2647,9 @@ void KaminoSolver::bodyforce() {
     KaminoTimer CGtimer;
     CGtimer.startTimer();
 # endif
-    AlgebraicMultiGridCG();
+    // AlgebraicMultiGridCG();
     // conjugateGradient();
+    AMGCLSolve();
 # ifdef PERFORMANCE_BENCHMARK
     this->CGTime += CGtimer.stopTimer() * 0.001f;
 # endif
