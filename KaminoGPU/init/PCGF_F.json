@@ -2,6 +2,7 @@
     "config_version": 2, 
     "solver": {
         "preconditioner": {
+	    "interpolator": "D2",
             "print_grid_stats": 0, 
             "print_vis_data": 0, 
             "solver": "AMG", 
@@ -24,11 +25,11 @@
         "solver": "PCGF", 
         "print_solve_stats": 0, 
         "obtain_timings": 0, 
-        "max_iters": 1000, 
+        "max_iters": 100,
         "monitor_residual": 1, 
         "convergence": "ABSOLUTE", 
         "scope": "main", 
-        "tolerance": 1e-05, 
+        "tolerance": 1e-06,
         "norm": "L2"
     }
 }
