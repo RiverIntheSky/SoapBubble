@@ -217,7 +217,7 @@ void KaminoSolver::printGPUarray(std::string repr, T* vec, int len) {
 	std::cout << cpuvec[i] << " ";
     std::cout << std::endl;
 
-    delete cpuvec;
+    delete[] cpuvec;
 }
 
 
@@ -240,5 +240,5 @@ void KaminoSolver::printGPUarraytoMATLAB(std::string filename, T* vec, int num_r
 	of << "\n";
     }
 
-    delete cpuvec;
+    delete[] cpuvec;
 }
