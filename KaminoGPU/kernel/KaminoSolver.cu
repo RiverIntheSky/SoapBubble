@@ -443,12 +443,6 @@ void KaminoSolver::stepForward() {
     this->bodyforceTime += timer.stopTimer() * 0.001f;
 # endif
     this->timeElapsed += this->timeStep;
-
-    float distortion = estimateDistortion();
-    std::cout << "max distortion " << distortion << std::endl;
-
-    if (distortion > 2.f)
-    	reInitializeMapping();
 }
 
 
@@ -617,14 +611,18 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
 	img_string.insert(0, "0");
     }
     img_string.insert(0, s + "vel");
+
+# ifdef WRITE_TXT
     std::string u_string = img_string;
     std::string v_string = img_string;
-    img_string.append(".exr");
     u_string.append("u.txt");
     v_string.append("v.txt");
 
     std::ofstream ofu(u_string);
     std::ofstream ofv(v_string);
+# endif
+
+    img_string.append(".exr");
 
     copyVelocityBack2CPU();
     std::vector<float> images[3];
@@ -648,7 +646,6 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
     for (size_t j = 0; j < nTheta; ++j) {
 	for (size_t i = 0; i < nPhi; ++i) {
 	    float uW = velPhi->getCPUValueAt(i, j);
-	    // ofu << uW << " ";
 	    float uE;
 	    float vN;
 	    float vS;
@@ -673,9 +670,11 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
 		    0.25 * velTheta->getCPUValueAt(oppositei, j - 1);
 	    }
 	    float u = 0.5 * (uW + uE);
-	    ofu << u << " ";
 	    float v = 0.5 * (vN + vS);
+# ifdef WRITE_TXT
+	    ofu << u << " ";
 	    ofv << v << " ";
+# endif
 	    if (u > maxu) {
 		maxu = u;
 		maxuthetaid = j;
@@ -703,8 +702,10 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
 	    images[1][j*nPhi+i] = v/2+0.5; // G
 	    images[2][j*nPhi+i] = 0.5; // B
 	}
+# ifdef WRITE_TXT
 	ofu << std::endl;
 	ofv << std::endl;
+# endif
     }
 
     std::cout << "max u = " << maxu << " theta " << maxuthetaid << " phi " << maxuphiid << std::endl;
@@ -722,11 +723,14 @@ void KaminoSolver::write_concentration_image(const std::string& s, const int fra
 	img_string.insert(0, "0");
     }
     img_string.insert(0, s + "con");
-    std::string mat_string = img_string;
-    img_string.append(".exr");
-    mat_string.append(".txt");
 
+# ifdef WRITE_TXT
+    std::string mat_string = img_string;
+    mat_string.append(".txt");
     std::ofstream of(mat_string);
+# endif
+
+    img_string.append(".exr");
 
     surfConcentration->copyBackToCPU();
     std::vector<float> images[3];
@@ -741,9 +745,13 @@ void KaminoSolver::write_concentration_image(const std::string& s, const int fra
 	    images[0][j*nPhi+i] = (con - 0.9) / 0.2;
 	    images[1][j*nPhi+i] = (con - 0.9) / 0.2;
 	    images[2][j*nPhi+i] = (con - 0.9) / 0.2;
+# ifdef WRITE_TXT
 	    of << con << " ";
+# endif
 	}
+# ifdef WRITE_TXT
 	of << std::endl;
+# endif
     }
 
     write_image(img_string, nPhi, nTheta, images);
@@ -757,14 +765,17 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 	img_string.insert(0, "0");
     }
     img_string.insert(0, s + "frame");
+
+# ifdef WRITE_TXT
     std::string mat_string = img_string;
-    img_string.append(".exr");
     mat_string.append(".txt");
 
     std::ofstream of(mat_string);
     std::ofstream thick;
     thick.open("thickness.txt", std::ofstream::out | std::ofstream::app);
+# endif
 
+    img_string.append(".exr");
     //    if (frame != 0) {
     // if (false) {
     // 	dim3 gridLayout;
@@ -834,17 +845,23 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 		    minE = Delta;
 		images[0][j*nPhi+i] = Delta * this->H * ratio;
 		images[1][j*nPhi+i] = Delta * this->H * ratio;
-		images[2][j*nPhi+i] = Delta * this->H * ratio; 
+		images[2][j*nPhi+i] = Delta * this->H * ratio;
+# ifdef WRITE_TXT
 		of << Delta * this->H * 2 << " ";
+# endif
 		//}
 	    }
+# ifdef WRITE_TXT
 	    of << std::endl;
+# endif
 	}
+# ifdef WRITE_TXT
 	thick << minE << std::endl;
 	thick.close();
+# endif
 
 	write_image(img_string, nPhi, nTheta, images);
-	std::cout << "min thickness " << minE << std::endl;
+	//	std::cout << "min thickness " << minE << std::endl;
     }    
 }
 

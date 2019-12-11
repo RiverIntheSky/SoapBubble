@@ -1598,10 +1598,8 @@ __global__ void applyforcevelthetaKernel
     int thetaId = blockIdx.x / splitVal;
     if (phiId >= nPhiGlobal) return;
 
-# ifdef sphere
     float gTheta = ((float)thetaId + vThetaThetaOffset) * gridLenGlobal;
     float gPhi = ((float)phiId + vThetaPhiOffset) * gridLenGlobal;
-# endif
 
     int thetaSouthId = thetaId + 1;
 
@@ -1670,7 +1668,7 @@ __global__ void applyforcevelphiKernel
     float sinTheta = sinf(gTheta);
     float cscTheta = 1.f / sinTheta;
 # else
-    sinTheta = 1.f; // no effect
+   float sinTheta = 1.f; // no effect
 # endif
 
     int phiWestId = (phiId - 1 + nPhiGlobal) % nPhiGlobal;
@@ -2647,9 +2645,9 @@ void KaminoSolver::bodyforce() {
     KaminoTimer CGtimer;
     CGtimer.startTimer();
 # endif
-    // AlgebraicMultiGridCG();
+    AlgebraicMultiGridCG();
     // conjugateGradient();
-    AMGCLSolve();
+    // AMGCLSolve();
 # ifdef PERFORMANCE_BENCHMARK
     this->CGTime += CGtimer.stopTimer() * 0.001f;
 # endif
@@ -3259,6 +3257,12 @@ void Kamino::run()
 # ifdef WRITE_CONCENTRATION_DATA
     solver.write_concentration_image(outputDir, i);
 # endif
+
+    float distortion = solver.estimateDistortion();
+    std::cout << "max distortion " << distortion << std::endl;
+
+    if (distortion > 5.f)
+    	solver.reInitializeMapping();
     }
 
 # ifdef PERFORMANCE_BENCHMARK

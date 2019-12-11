@@ -81,3 +81,4 @@ enum Coord { phi, theta };
 # define uair
 # define evaporation -0.000000005
 // # define vair
+// # define WRITE_TXT
