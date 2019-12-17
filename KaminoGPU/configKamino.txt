@@ -6,10 +6,10 @@ Gammam 0.0000005
 T 298.15
 Ds 0.0
 rm 0.000000005
-numberOfGridsInTheta 1000
-timePerStep 0.001
+numberOfGridsInTheta 512
+timePerStep 0.002
 timePerFrame 0.02
-frameNumbers 5
+frameNumbers 500
 outputDir ../out/test
 thicknessInit ../init/thickness1024.exr
 AMGconfig ../init/PCGF_F.json

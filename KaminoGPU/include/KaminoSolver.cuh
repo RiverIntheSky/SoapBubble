@@ -62,6 +62,7 @@ private:
     size_t nTheta;
     /* Cuda dimensions */
     size_t nThreadxMax;
+    int device;
     /* Radius of sphere */
     float radius;
     /* Inverted radius of sphere */

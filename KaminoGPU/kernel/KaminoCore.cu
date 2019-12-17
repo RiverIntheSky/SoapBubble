@@ -37,7 +37,10 @@ static __constant__ float W2;
 
 
 # define eps 1e-5f
-# define MAX_BLOCK_SIZE 1024
+# define MAX_BLOCK_SIZE 8192 /* maximal allowed resolution 2048 x 4096,
+				when nThreadxMax = 1024, because
+				2048 x 4096 / 1024 = 8192 */
+
 
 namespace amgcl {
     profiler<> prof("v2");
@@ -1034,6 +1037,11 @@ float KaminoSolver::maxAbs(float* array, size_t nTheta, size_t nPhi) {
     dim3 gridLayout;
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+    if (gridLayout.x > MAX_BLOCK_SIZE) {
+	gridLayout.x = MAX_BLOCK_SIZE;
+	blockLayout.x = N / MAX_BLOCK_SIZE;
+	// TODO: check whether blockLayout.x > deviceProp.maxThreadsDim[0]
+    }
     maxValKernel<<<gridLayout, blockLayout>>>(max, array);
     CHECK_CUDA(cudaDeviceSynchronize());
     maxValKernel<<<1, blockLayout>>>(max, max);
@@ -1046,20 +1054,31 @@ float KaminoSolver::maxAbs(float* array, size_t nTheta, size_t nPhi) {
 
 
 void KaminoSolver::updateForward(float dt, float* &fwd_t, float* &fwd_p) {
+    bool substep = false;
     float T = 0.0;
     float dt_ = dt / radius; // scaled; assume U = 1
-    float substep = std::min(cfldt, dt_); // cfl < 1 required
     
     dim3 gridLayout;
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
 
-    while (T < dt_) {
-	if (T + substep > dt_) substep = dt_ - T;
+    if (substep) {
+	float substep = std::min(cfldt, dt_); // cfl < 1 required
+	while (T < dt_) {
+	    if (T + substep > dt_) substep = dt_ - T;
+	    updateMappingKernel<<<gridLayout, blockLayout>>>
+		(velTheta->getGPUThisStep(), velPhi->getGPUThisStep(), -substep,
+		 fwd_t, fwd_p, tmp_t, tmp_p, pitch);
+	    T += substep;
+	    CHECK_CUDA(cudaGetLastError());
+	    CHECK_CUDA(cudaDeviceSynchronize());
+	    std::swap(fwd_t, tmp_t);
+	    std::swap(fwd_p, tmp_p);
+	}
+    } else {
 	updateMappingKernel<<<gridLayout, blockLayout>>>
-	    (velTheta->getGPUThisStep(), velPhi->getGPUThisStep(), -substep,
+	    (velTheta->getGPUThisStep(), velPhi->getGPUThisStep(), -dt_,
 	     fwd_t, fwd_p, tmp_t, tmp_p, pitch);
-	T += substep;
 	CHECK_CUDA(cudaGetLastError());
 	CHECK_CUDA(cudaDeviceSynchronize());
 	std::swap(fwd_t, tmp_t);
@@ -1069,20 +1088,30 @@ void KaminoSolver::updateForward(float dt, float* &fwd_t, float* &fwd_p) {
 
 
 void KaminoSolver::updateBackward(float dt, float* &bwd_t, float* &bwd_p) {
+    bool substep = false;
     float T = 0.0;
     float dt_ = dt / radius; // scaled; assume U = 1
-    float substep = std::min(cfldt, dt_); // cfl < 1 required
 
     dim3 gridLayout;
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
-
-    while (T < dt_) {
-	if (T + substep > dt_) substep = dt_ - T;
+    if (substep) {
+	float substep = std::min(cfldt, dt_); // cfl < 1 required
+	while (T < dt_) {
+	    if (T + substep > dt_) substep = dt_ - T;
+	    updateMappingKernel<<<gridLayout, blockLayout>>>
+		(velTheta->getGPUThisStep(), velPhi->getGPUThisStep(), substep,
+		 bwd_t, bwd_p, tmp_t, tmp_p, pitch);
+	    T += substep;
+	    CHECK_CUDA(cudaGetLastError());
+	    CHECK_CUDA(cudaDeviceSynchronize());
+	    std::swap(bwd_t, tmp_t);
+	    std::swap(bwd_p, tmp_p);
+	}
+    } else {
 	updateMappingKernel<<<gridLayout, blockLayout>>>
-	    (velTheta->getGPUThisStep(), velPhi->getGPUThisStep(), substep,
+	    (velTheta->getGPUThisStep(), velPhi->getGPUThisStep(), dt_,
 	     bwd_t, bwd_p, tmp_t, tmp_p, pitch);
-	T += substep;
 	CHECK_CUDA(cudaGetLastError());
 	CHECK_CUDA(cudaDeviceSynchronize());
 	std::swap(bwd_t, tmp_t);
@@ -1130,10 +1159,10 @@ float KaminoSolver::estimateDistortion() {
 
     // forward then backward, result saved to tmp_t
     estimateDistortionKernel<<<gridLayout, blockLayout>>>
-	(forward_t, forward_p, backward_t, backward_p, tmp_t);
+    	(forward_t, forward_p, backward_t, backward_p, tmp_t);
     // backward then forward, result saved to tmp_p
     estimateDistortionKernel<<<gridLayout, blockLayout>>>
-	(backward_t, backward_p, forward_t, forward_p, tmp_p);
+    	(backward_t, backward_p, forward_t, forward_p, tmp_p);
     CHECK_CUDA(cudaDeviceSynchronize());
     CHECK_CUDA(cudaGetLastError());
 
@@ -2711,7 +2740,7 @@ void KaminoSolver::bodyforce() {
 	determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
 	applyforceThickness<<<gridLayout, blockLayout>>>
 	    (thickness->getGPUNextStep(), thickness->getGPUThisStep(),
-	     tmp_t, div, thickness->getNextStepPitchInElements());
+	     tmp_t, div, pitch);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
 
@@ -3249,20 +3278,22 @@ void Kamino::run()
 	std::cout << "Frame " << i << " is ready" << std::endl;
 
 # ifdef WRITE_THICKNESS_DATA
-    solver.write_thickness_img(outputDir, i);
+	solver.write_thickness_img(outputDir, i);
 # endif  
 # ifdef WRITE_VELOCITY_DATA
-    solver.write_velocity_image(outputDir, i);
+	solver.write_velocity_image(outputDir, i);
 # endif  
 # ifdef WRITE_CONCENTRATION_DATA
-    solver.write_concentration_image(outputDir, i);
+	solver.write_concentration_image(outputDir, i);
 # endif
 
-    float distortion = solver.estimateDistortion();
-    std::cout << "max distortion " << distortion << std::endl;
+	float distortion = solver.estimateDistortion();
+	std::cout << "max distortion " << distortion << std::endl;
 
-    if (distortion > 5.f)
-    	solver.reInitializeMapping();
+	if (distortion > 5.f) {
+	    solver.reInitializeMapping();
+	    std::cout << "mapping reinitialized" << std::endl;
+	}
     }
 
 # ifdef PERFORMANCE_BENCHMARK

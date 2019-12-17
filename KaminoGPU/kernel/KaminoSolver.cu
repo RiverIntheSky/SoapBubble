@@ -81,7 +81,7 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
     nPhi(nPhi), nTheta(nTheta), radius(radius), invRadius(1.0/radius), gridLen(M_2PI / nPhi),
     invGridLen(1.0 / gridLen), timeStep(dt), timeElapsed(0.0), advectionTime(0.0),
     bodyforceTime(0.0), CGTime(0.0), H(H), epsilon(H/radius), N(nPhi*nTheta), nz(5*N),
-    particleDensity(particleDensity)
+    particleDensity(particleDensity), device(device)
 {
     /// FIXME: Should we detect and use device 0?
     /// Replace it later with functions from helper_cuda.h!
@@ -89,6 +89,7 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
 
     cudaDeviceProp deviceProp;
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, device));
+    // otherwise no enough resource
     this->nThreadxMax = std::min(deviceProp.maxThreadsDim[0], 128);
 
     checkCudaErrors(cudaMalloc((void **)(&div),
