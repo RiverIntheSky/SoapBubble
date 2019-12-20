@@ -72,13 +72,20 @@ enum Coord { phi, theta };
 # define WRITE_THICKNESS_DATA
 # define WRITE_CONCENTRATION_DATA
 # define RUNGE_KUTTA
-// # define RK2
-# define RK3
 # define PERFORMANCE_BENCHMARK
 # define TINYEXR_IMPLEMENTATION
 # define sphere
-# define gravity
-# define uair
-# define evaporation -0.000000005
-// # define vair
-// # define WRITE_TXT
+// # define gravity
+# define tiltedGravity
+
+// if both gravity and tilted are defined, tilted has priority
+# ifdef tiltedGravity
+# undef gravity
+# endif
+
+# define air
+// # define uair
+# define evaporation -0.000000008
+// # define vair // TODO: delete
+# define WRITE_TXT
+# define BIMOCQ

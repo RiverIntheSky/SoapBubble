@@ -96,6 +96,10 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
 			       sizeof(float) * N));
     checkCudaErrors(cudaMalloc((void **)(&weight),
 			       sizeof(float2) * N));
+    checkCudaErrors(cudaMalloc((void **)(&uair),
+			       sizeof(float) * N));
+    checkCudaErrors(cudaMalloc((void **)(&vair),
+			       sizeof(float) * (N - nPhi)));
     checkCudaErrors(cudaMalloc((void **)(&row_ptr),
 			       sizeof(int) * (N + 1)));
     checkCudaErrors(cudaMalloc((void **)(&col_ind),
@@ -430,9 +434,11 @@ void KaminoSolver::stepForward() {
     KaminoTimer timer;
     timer.startTimer();
 # endif
+# ifdef BIMOCQ
     updateCFL();
     updateForward(this->timeStep, forward_t, forward_p);
     updateBackward(this->timeStep, backward_t, backward_p);
+# endif
 
     advection();
 # ifdef PERFORMANCE_BENCHMARK

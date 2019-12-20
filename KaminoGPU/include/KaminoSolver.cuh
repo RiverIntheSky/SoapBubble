@@ -74,6 +74,9 @@ private:
     /* Whether film is broken */
     bool broken = false;
 
+    /* airflow */
+    float *uair, *vair;
+
     /* harmonic coefficients for velocity field initializaton */
     //    int B, C, D, E;
 
@@ -121,11 +124,6 @@ private:
     float bodyforceTime;
     float CGTime;
 
-    /* CFL */
-    float cfldt;
-    float maxu;
-    float maxv;
-
     /* AMGX */
     AMGX_Mode mode;
     AMGX_config_handle cfg;
@@ -145,7 +143,7 @@ private:
 	*backward_p, *backward_t,
 	*backward_pprev, *backward_tprev,
 	*tmp_p, *tmp_t;
-    void updateCFL();
+    void updateCFL(); // TODO: delete
 
     /// Kernel calling from here
     void advection();
@@ -210,6 +208,13 @@ public:
     bool validateCoord(double2& Id);
 
     int count = 0;
+
+    // TODO: delete
+    /* CFL */
+    float cfldt;
+    float maxu;
+    float maxv;
+
 };
 
 
