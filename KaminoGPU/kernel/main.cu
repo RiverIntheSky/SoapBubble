@@ -8,13 +8,14 @@ int main(int argc, char** argv)
 	    std::string configFile = argv[1];
 	    std::fstream fin;
 	    fin.open(configFile, std::ios::in);
-	    float r; float H; float U; float c_m;
-	    float Gamma_m; float T; float Ds;
-	    float rm; size_t nTheta;
-	    float dt; float DT; int frames;
+	    fReal r; fReal H; fReal U; fReal c_m;
+	    fReal Gamma_m; fReal T; fReal Ds;
+	    fReal rm; size_t nTheta;
+	    fReal dt; fReal DT; int frames;
 	    std::string outputDir;
 	    std::string thicknessImage; size_t particleDensity;
-	    std::string attrib; int device; float blendCoeff;
+	    // TODO: delete particles
+	    std::string attrib; int device; fReal blendCoeff;
 	    std::string AMGconfig;
 
 	    fin >> attrib;  fin >> r;

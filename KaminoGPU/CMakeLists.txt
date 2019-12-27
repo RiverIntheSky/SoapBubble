@@ -33,14 +33,6 @@ find_package(Boost COMPONENTS filesystem REQUIRED)
 include_directories(${Boost_INCLUDE_DIR})
 link_directories(${Boost_LIBRARY_DIR})
 
-find_package(Ceres REQUIRED)
-include_directories(${CERES_INCLUDE_DIRS})
-
-option(BUILD_TESTS "Build the tests" ON)
-if(BUILD_TESTS)
-    add_subdirectory(tests)
-endif()
-
 cuda_add_executable(kamino
   ./kernel/KaminoCore.cu
   ./kernel/KaminoInitializer.cu
@@ -66,5 +58,4 @@ target_link_libraries(kamino
   cufft
   amgxsh
   ${Boost_LIBRARIES}
-  ${CERES_LIBRARIES}
   )

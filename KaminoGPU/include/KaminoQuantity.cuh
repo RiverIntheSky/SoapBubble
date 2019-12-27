@@ -13,20 +13,20 @@ protected:
     size_t nTheta;
 
     /* Grid size */
-    float gridLen;
+    fReal gridLen;
     /* 1.0 / gridlen */
-    float invGridLen;
+    fReal invGridLen;
 
     /* Staggered? */
-    float phiOffset;
-    float thetaOffset;
+    fReal phiOffset;
+    fReal thetaOffset;
 
     /* Initial buffer at client side */
-    float* cpuBuffer;
+    fReal* cpuBuffer;
     /* Double pitch buffer at server side */
-    float* gpuThisStep;
+    fReal* gpuThisStep;
     size_t thisStepPitch;
-    float* gpuNextStep;
+    fReal* gpuNextStep;
     size_t nextStepPitch;
 
     //cudaChannelFormatDesc desc;
@@ -36,7 +36,7 @@ protected:
 public:
     /* Constructor */
     KaminoQuantity(std::string attributeName, size_t nPhi, size_t nTheta,
-		   float phiOffset, float thetaOffset);
+		   fReal phiOffset, fReal thetaOffset);
     /* Destructor */
     ~KaminoQuantity();
 
@@ -54,16 +54,16 @@ public:
     /* Get theta dimension size */
     size_t getNTheta();
     /* Get the current step */
-    float getCPUValueAt(size_t x, size_t y);
+    fReal getCPUValueAt(size_t x, size_t y);
     /* Set the current step */
-    void setCPUValueAt(size_t x, size_t y, float val);
+    void setCPUValueAt(size_t x, size_t y, fReal val);
     /* Access */
-    float& accessCPUValueAt(size_t x, size_t y);
+    fReal& accessCPUValueAt(size_t x, size_t y);
     /* Get the offset */
-    float getPhiOffset();
-    float getThetaOffset();
-    float* getGPUThisStep();
-    float* getGPUNextStep();
+    fReal getPhiOffset();
+    fReal getThetaOffset();
+    fReal* getGPUThisStep();
+    fReal* getGPUNextStep();
 
     size_t getThisStepPitchInElements();
     size_t getNextStepPitchInElements();
@@ -75,22 +75,22 @@ public:
 class BimocqQuantity: public KaminoQuantity {
 private:
     /* initial value */
-    float* gpuInit;
+    fReal* gpuInit;
     /* accumulated changes */
-    float* gpuDelta;
+    fReal* gpuDelta;
     /* last value before reinitialization */
-    float* gpuInitLast;
+    fReal* gpuInitLast;
     /* last accumulated changes */
-    float* gpuDeltaLast;
+    fReal* gpuDeltaLast;
 public:
     /* Constructor */
     BimocqQuantity(std::string attributeName, size_t nPhi, size_t nTheta,
-		   float phiOffset, float thetaOffset);
+		   fReal phiOffset, fReal thetaOffset);
     /* Destructor */
     ~BimocqQuantity();
 
-    float*& getGPUInit();
-    float*& getGPUDelta();
-    float*& getGPUInitLast();
-    float*& getGPUDeltaLast();
+    fReal*& getGPUInit();
+    fReal*& getGPUDelta();
+    fReal*& getGPUInitLast();
+    fReal*& getGPUDeltaLast();
 };

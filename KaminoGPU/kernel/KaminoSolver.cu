@@ -7,23 +7,13 @@ const int fftRank = 1;
 static const int m = 3;
 static __constant__ size_t nPhiGlobal;
 static __constant__ size_t nThetaGlobal;
-static __constant__ float gridLenGlobal;
+static __constant__ fReal gridLenGlobal;
 static __constant__ int Cols;
 static __constant__ int Rows;
 static __constant__ int Ratio;
 
 
-__global__ void initParticleValues(float* particleVal, float* particleCoord, float* thickness, size_t pitch) {
-    int particleId = blockIdx.x * blockDim.x + threadIdx.x;
-    float thetaId = particleCoord[2 * particleId];
-    float phiId = particleCoord[2 * particleId + 1];
-
-    float2 sampleId = make_float2(thetaId, phiId);
-    particleVal[particleId] = sampleCentered(thickness, sampleId, pitch);
-}
-
-
-__global__ void initMapping(float* map_theta, float* map_phi){
+__global__ void initMapping(fReal* map_theta, fReal* map_phi){
     // Index
     int splitVal = (nPhiGlobal + blockDim.x - 1) / blockDim.x;
     int threadSequence = blockIdx.x % splitVal;
@@ -31,8 +21,8 @@ __global__ void initMapping(float* map_theta, float* map_phi){
     int thetaId = blockIdx.x / splitVal;
     if (phiId >= nPhiGlobal) return;
 
-    map_theta[thetaId * nPhiGlobal + phiId] = (float)thetaId + centeredThetaOffset;
-    map_phi[thetaId * nPhiGlobal + phiId] = (float)phiId + centeredPhiOffset;
+    map_theta[thetaId * nPhiGlobal + phiId] = (fReal)thetaId + centeredThetaOffset;
+    map_phi[thetaId * nPhiGlobal + phiId] = (fReal)phiId + centeredPhiOffset;
 }
 
 
@@ -76,8 +66,8 @@ __global__ void initLinearSystem(int* row_ptr, int* col_ind) {
 }
 
 
-KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
-			   float H, int device, std::string AMGconfig, size_t particleDensity) :
+KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal dt,
+			   fReal H, int device, std::string AMGconfig, size_t particleDensity) :
     nPhi(nPhi), nTheta(nTheta), radius(radius), invRadius(1.0/radius), gridLen(M_2PI / nPhi),
     invGridLen(1.0 / gridLen), timeStep(dt), timeElapsed(0.0), advectionTime(0.0),
     bodyforceTime(0.0), CGTime(0.0), H(H), epsilon(H/radius), N(nPhi*nTheta), nz(5*N),
@@ -93,21 +83,21 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
     this->nThreadxMax = std::min(deviceProp.maxThreadsDim[0], 128);
 
     checkCudaErrors(cudaMalloc((void **)(&div),
-			       sizeof(float) * N));
+			       sizeof(fReal) * N));
     checkCudaErrors(cudaMalloc((void **)(&weight),
-			       sizeof(float2) * N));
+			       sizeof(fReal2) * N));
     checkCudaErrors(cudaMalloc((void **)(&uair),
-			       sizeof(float) * N));
+			       sizeof(fReal) * N));
     checkCudaErrors(cudaMalloc((void **)(&vair),
-			       sizeof(float) * (N - nPhi)));
+			       sizeof(fReal) * (N - nPhi)));
     checkCudaErrors(cudaMalloc((void **)(&row_ptr),
 			       sizeof(int) * (N + 1)));
     checkCudaErrors(cudaMalloc((void **)(&col_ind),
 			       sizeof(int) * nz));
     checkCudaErrors(cudaMalloc((void **)(&rhs),
-			       sizeof(float) * N));
+			       sizeof(fReal) * N));
     checkCudaErrors(cudaMalloc((void **)(&val),
-			       sizeof(float) * nz));
+			       sizeof(fReal) * nz));
 
     checkCudaErrors(cudaMemcpyToSymbol(nPhiGlobal, &(this->nPhi), sizeof(size_t)));
     checkCudaErrors(cudaMemcpyToSymbol(nThetaGlobal, &(this->nTheta), sizeof(size_t)));
@@ -149,32 +139,9 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
     // printGPUarraytoMATLAB<int>("test/row_ptr.txt", row_ptr, N + 1, 1, 1);
     // printGPUarraytoMATLAB<int>("test/col_ind.txt", col_ind, N, 5, 5);
     
-    // cuSPARSE and cuBLAS
-    CHECK_CUBLAS(cublasCreate(&cublasHandle));
-    CHECK_CUSPARSE(cusparseCreate(&cusparseHandle));
-
     // Device memory management
-    CHECK_CUDA(cudaMalloc(&d_x, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_r, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_p, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_omega, N * sizeof(float)));   
-	
-    // Create preconditioner and dense vectors
-    // CHECK_CUSPARSE(cusparseCreateCsr(&matM, N, N, N, row_ptrm, col_indm,
-    // 				     valm, CUSPARSE_INDEX_32I,
-    // 				     CUSPARSE_INDEX_32I,
-    // 				     CUSPARSE_INDEX_BASE_ZERO,
-    // 				     CUDA_R_32F));
-    CHECK_CUSPARSE(cusparseCreateDnVec(&vecX, N, d_x, CUDA_R_32F));
-    CHECK_CUSPARSE(cusparseCreateDnVec(&vecR, N, d_r, CUDA_R_32F));
-    CHECK_CUSPARSE(cusparseCreateDnVec(&vecP, N, d_p, CUDA_R_32F));
-    CHECK_CUSPARSE(cusparseCreateDnVec(&vecO, N, d_omega, CUDA_R_32F));
-
-    CHECK_CUSPARSE(cusparseCreateMatDescr(&descrA));
-
-    /* Define the properties of the matrix */
-    cusparseSetMatType(descrA,CUSPARSE_MATRIX_TYPE_GENERAL);
-    cusparseSetMatIndexBase(descrA,CUSPARSE_INDEX_BASE_ZERO);
+    CHECK_CUDA(cudaMalloc(&d_x, N * sizeof(fReal)));
+    CHECK_CUDA(cudaMalloc(&d_r, N * sizeof(fReal)));
     
     int sigLenArr[1];
     sigLenArr[0] = nPhi;
@@ -191,34 +158,38 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, float radius, float dt,
     AMGX_initialize_plugins();
     AMGX_config_create_from_file(&cfg, AMGconfigFile);
     AMGX_resources_create(&res, cfg, NULL, 1, devices);
+# ifdef USEFLOAT
     mode = AMGX_mode_dFFI;
+# else
+    mode = AMGX_mode_dDDI;
+# endif
     AMGX_matrix_create(&A, res, mode);
     AMGX_vector_create(&b, res, mode);
     AMGX_vector_create(&x, res, mode);
     AMGX_solver_create(&solver, res, mode, cfg);
 
     /* Bimocq mapping buffers */
-    CHECK_CUDA(cudaMalloc(&forward_p, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&forward_t, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&backward_p, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&backward_t, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&backward_pprev, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&backward_tprev, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&tmp_p, N * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&tmp_t, N * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&forward_p, N * sizeof(fReal)));
+    CHECK_CUDA(cudaMalloc(&forward_t, N * sizeof(fReal)));
+    CHECK_CUDA(cudaMalloc(&backward_p, N * sizeof(fReal)));
+    CHECK_CUDA(cudaMalloc(&backward_t, N * sizeof(fReal)));
+    CHECK_CUDA(cudaMalloc(&backward_pprev, N * sizeof(fReal)));
+    CHECK_CUDA(cudaMalloc(&backward_tprev, N * sizeof(fReal)));
+    CHECK_CUDA(cudaMalloc(&tmp_p, N * sizeof(fReal)));
+    CHECK_CUDA(cudaMalloc(&tmp_t, N * sizeof(fReal)));
     
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
     initMapping<<<gridLayout, blockLayout>>>(forward_t, forward_p);
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaDeviceSynchronize());
 
-    CHECK_CUDA(cudaMemcpy(backward_p, forward_p, N * sizeof(float),
+    CHECK_CUDA(cudaMemcpy(backward_p, forward_p, N * sizeof(fReal),
 			  cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(backward_pprev, forward_p, N * sizeof(float),
+    CHECK_CUDA(cudaMemcpy(backward_pprev, forward_p, N * sizeof(fReal),
 			  cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(backward_t, forward_t, N * sizeof(float),
+    CHECK_CUDA(cudaMemcpy(backward_t, forward_t, N * sizeof(fReal),
 			  cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(backward_tprev, forward_t, N * sizeof(float),
+    CHECK_CUDA(cudaMemcpy(backward_tprev, forward_t, N * sizeof(fReal),
 			  cudaMemcpyDeviceToDevice));
 }
 
@@ -232,20 +203,8 @@ KaminoSolver::~KaminoSolver()
     CHECK_CUDA(cudaFree(rhs));
     CHECK_CUDA(cudaFree(val));
 
-    // CHECK_CUSPARSE(cusparseDestroySpMat(matM));
-    CHECK_CUSPARSE(cusparseDestroyMatDescr(descrA));
-    CHECK_CUSPARSE(cusparseDestroyDnVec(vecX));
-    CHECK_CUSPARSE(cusparseDestroyDnVec(vecR));
-    CHECK_CUSPARSE(cusparseDestroyDnVec(vecP));
-    CHECK_CUSPARSE(cusparseDestroyDnVec(vecO));
-    CHECK_CUBLAS(cublasDestroy(cublasHandle));
-    CHECK_CUSPARSE(cusparseDestroy(cusparseHandle));
-
     CHECK_CUDA(cudaFree(d_r));
     CHECK_CUDA(cudaFree(d_x));
-    CHECK_CUDA(cudaFree(d_p));
-    CHECK_CUDA(cudaFree(d_omega));
-
 
     delete this->velPhi;
     delete this->velTheta;
@@ -279,7 +238,7 @@ KaminoSolver::~KaminoSolver()
     CHECK_CUDA(cudaDeviceReset());
 
 # ifdef PERFORMANCE_BENCHMARK
-    float totalTimeUsed = this->advectionTime + this->bodyforceTime;
+    fReal totalTimeUsed = this->advectionTime + this->bodyforceTime;
     std::cout << "Total time used for advection : " << this->advectionTime << std::endl;
     std::cout << "Total time used for body force : " << this->bodyforceTime << std::endl;
     std::cout << "Total time used for CG : " << CGTime << std::endl;
@@ -315,19 +274,19 @@ void KaminoSolver::determineLayout(dim3& gridLayout, dim3& blockLayout,
 }
 
 
-void KaminoSolver::copyToCPU(KaminoQuantity* quantity, float* cpubuffer) {
-    checkCudaErrors(cudaMemcpy2D((void*)cpubuffer, quantity->getNPhi() * sizeof(float),
+void KaminoSolver::copyToCPU(KaminoQuantity* quantity, fReal* cpubuffer) {
+    checkCudaErrors(cudaMemcpy2D((void*)cpubuffer, quantity->getNPhi() * sizeof(fReal),
 				 (void*)quantity->getGPUThisStep(),
-				 quantity->getThisStepPitchInElements() * sizeof(float),
-				 quantity->getNPhi() * sizeof(float), quantity->getNTheta(),
+				 quantity->getThisStepPitchInElements() * sizeof(fReal),
+				 quantity->getNPhi() * sizeof(fReal), quantity->getNTheta(),
 				 cudaMemcpyDeviceToHost));
 }
 
 
-float KaminoSolver::maxAbsDifference(const float* A, const float* B, const size_t& size) {
-    float res = 0.f;
+fReal KaminoSolver::maxAbsDifference(const fReal* A, const fReal* B, const size_t& size) {
+    fReal res = 0.f;
     for (int i = 0; i < size; i++) {
-	float diff = std::abs(A[i] - B[i]);
+	fReal diff = std::abs(A[i] - B[i]);
 	if (diff > res)
 	    res = diff;
     }
@@ -335,7 +294,7 @@ float KaminoSolver::maxAbsDifference(const float* A, const float* B, const size_
 }
 
 
-void KaminoSolver::adjustStepSize(float& dt, const float& U, const float& epsilon) {
+void KaminoSolver::adjustStepSize(fReal& dt, const fReal& U, const fReal& epsilon) {
     copyVelocityBack2CPU();
     thickness->copyBackToCPU();
     surfConcentration->copyBackToCPU();
@@ -343,17 +302,17 @@ void KaminoSolver::adjustStepSize(float& dt, const float& U, const float& epsilo
     size_t sizePhiAndCentered = velPhi->getNPhi() * velPhi->getNTheta();
     size_t sizeTheta = velTheta->getNPhi() * velTheta->getNTheta();
     
-    float* uSmall = new float[sizePhiAndCentered];
-    float* vSmall = new float[sizeTheta];
-    float* deltaSmall = new float[sizePhiAndCentered];
-    float* gammaSmall = new float[sizePhiAndCentered];
+    fReal* uSmall = new fReal[sizePhiAndCentered];
+    fReal* vSmall = new fReal[sizeTheta];
+    fReal* deltaSmall = new fReal[sizePhiAndCentered];
+    fReal* gammaSmall = new fReal[sizePhiAndCentered];
 
-    float* uLarge = new float[sizePhiAndCentered];
-    float* vLarge = new float[sizeTheta];
-    float* deltaLarge = new float[sizePhiAndCentered];
-    float* gammaLarge = new float[sizePhiAndCentered];
+    fReal* uLarge = new fReal[sizePhiAndCentered];
+    fReal* vLarge = new fReal[sizeTheta];
+    fReal* deltaLarge = new fReal[sizePhiAndCentered];
+    fReal* gammaLarge = new fReal[sizePhiAndCentered];
 
-    float optTimeStep = dt;
+    fReal optTimeStep = dt;
     int loop = 0;
     while (true) {
 
@@ -387,7 +346,7 @@ void KaminoSolver::adjustStepSize(float& dt, const float& U, const float& epsilo
 	thickness->copyToGPU();
 	surfConcentration->copyToGPU();
 
-	float maxError = std::max(maxAbsDifference(uSmall, uLarge, sizePhiAndCentered),
+	fReal maxError = std::max(maxAbsDifference(uSmall, uLarge, sizePhiAndCentered),
 				  std::max(maxAbsDifference(vSmall, vLarge, sizeTheta),
 					   std::max(maxAbsDifference(deltaSmall, deltaLarge, sizePhiAndCentered),
 						    maxAbsDifference(gammaSmall, gammaLarge, sizePhiAndCentered))));
@@ -421,8 +380,8 @@ void KaminoSolver::adjustStepSize(float& dt, const float& U, const float& epsilo
 }
 
 
-void KaminoSolver::stepForward(float dt) {
-    float dt_ = this->timeStep;
+void KaminoSolver::stepForward(fReal dt) {
+    fReal dt_ = this->timeStep;
     this->timeStep = dt;
     stepForward();
     this->timeStep = dt_;
@@ -450,6 +409,7 @@ void KaminoSolver::stepForward() {
     this->bodyforceTime += timer.stopTimer() * 0.001f;
 # endif
     this->timeElapsed += this->timeStep;
+    count++;
 }
 
 
@@ -467,34 +427,6 @@ void KaminoSolver::copyVelocityBack2CPU()
 }
 
 
-void KaminoSolver::initWithConst(KaminoQuantity* attrib, float val)
-{
-    for (size_t i = 0; i < attrib->getNPhi(); ++i) {
-	for (size_t j = 0; j < attrib->getNTheta(); ++j) {
-		attrib->setCPUValueAt(i, j, val);
-	    }
-    }
-    attrib->copyToGPU();
-}
-
-
-void KaminoSolver::initWithConst(BimocqQuantity* attrib, float val)
-{
-    for (size_t i = 0; i < attrib->getNPhi(); ++i) {
-	for (size_t j = 0; j < attrib->getNTheta(); ++j) {
-		attrib->setCPUValueAt(i, j, val);
-	    }
-    }
-    attrib->copyToGPU();
-    CHECK_CUDA(cudaMemcpy(attrib->getGPUInit(), attrib->getGPUThisStep(),
-			  pitch * attrib->getNTheta() *
-			  sizeof(float), cudaMemcpyDeviceToDevice));
-    CHECK_CUDA(cudaMemcpy(attrib->getGPUInitLast(), attrib->getGPUThisStep(),
-			  pitch * attrib->getNTheta() *
-			  sizeof(float), cudaMemcpyDeviceToDevice));
-}
-
-
 bool KaminoSolver::isBroken() {
     return this->broken;
 }
@@ -503,63 +435,6 @@ bool KaminoSolver::isBroken() {
 void KaminoSolver::setBroken(bool broken) {
     this->broken = broken;
 }
-
-
-void KaminoSolver::initThicknessfromPic(std::string path)
-{
-    if (path == "") {
-	std::cout << "No thickness image provided, initialize with eta = 0.5" << std::endl;
-    } else {
-	cv::Mat image_In, image_Flipped;
-	image_In = cv::imread(path, cv::IMREAD_UNCHANGED);
-	if (!image_In.data) {
-	    std::cout << "No thickness image provided, initialize with eta = 0.5" << std::endl;
-	} else {
-	    cv::Mat image_Resized;
-	    cv::flip(image_In, image_Flipped, 1);
-	    cv::Size size(nPhi, nTheta);
-	    cv::resize(image_Flipped, image_Resized, size);
-
-	    for (size_t i = 0; i < nPhi; ++i) {
-		for (size_t j = 0; j < nTheta; ++j) {
-		    cv::Point3_<float>* p = image_Resized.ptr<cv::Point3_<float>>(j, i);
-		    float C = p->x; // Gray Scale
-		    this->thickness->setCPUValueAt(i, j, C);
-		}
-	    }
-	    this->thickness->copyToGPU();
-    
-	    this->rows = image_Flipped.rows;
-	    this->cols = image_Flipped.cols;
-   	}
-    }
-
-    CHECK_CUDA(cudaMemcpy(this->thickness->getGPUInit(), this->thickness->getGPUThisStep(),
-			  this->thickness->getThisStepPitchInElements() * this->thickness->getNTheta() *
-			  sizeof(float), cudaMemcpyDeviceToDevice));
-
-    CHECK_CUDA(cudaMemcpy(this->thickness->getGPUInitLast(), this->thickness->getGPUThisStep(),
-			  this->thickness->getThisStepPitchInElements() * this->thickness->getNTheta() *
-			  sizeof(float), cudaMemcpyDeviceToDevice));
-
-    if (particleDensity > 0) {
-	this->particles = new KaminoParticles(path, particleDensity, gridLen, nTheta);
-    	dim3 gridLayout;
-    	dim3 blockLayout;
-    	determineLayout(gridLayout, blockLayout, 1, this->particles->numOfParticles);
-    	initParticleValues<<<gridLayout, blockLayout>>>
-    	    (this->particles->value, this->particles->coordGPUThisStep, this->thickness->getGPUThisStep(),
-    	     this->thickness->getThisStepPitchInElements());
-    	checkCudaErrors(cudaGetLastError());
-    	checkCudaErrors(cudaDeviceSynchronize());	
-    }
-}
-
-
-// void KaminoSolver::initParticlesfromPic(std::string path, size_t parPerGrid)
-// {
-//     this->particles = new KaminoParticles(path, parPerGrid, gridLen, nTheta);
-// }
 
 
 void KaminoSolver::write_image(const std::string& s, size_t width, size_t height, std::vector<float> *images) {
@@ -637,10 +512,10 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
     images[1].resize(nPhi * nTheta);
     images[2].resize(nPhi * nTheta);
 
-    float maxu = std::numeric_limits<float>::min();
-    float maxv = std::numeric_limits<float>::min();
-    float minu = std::numeric_limits<float>::max();
-    float minv = std::numeric_limits<float>::max();
+    fReal maxu = std::numeric_limits<fReal>::min();
+    fReal maxv = std::numeric_limits<fReal>::min();
+    fReal minu = std::numeric_limits<fReal>::max();
+    fReal minv = std::numeric_limits<fReal>::max();
     size_t maxuthetaid = 0;
     size_t maxuphiid = 0;
     size_t minuthetaid = 0;
@@ -652,10 +527,10 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
 
     for (size_t j = 0; j < nTheta; ++j) {
 	for (size_t i = 0; i < nPhi; ++i) {
-	    float uW = velPhi->getCPUValueAt(i, j);
-	    float uE;
-	    float vN;
-	    float vS;
+	    fReal uW = velPhi->getCPUValueAt(i, j);
+	    fReal uE;
+	    fReal vN;
+	    fReal vS;
 	    if (i != nPhi - 1) {
 	        uE = velPhi->getCPUValueAt(i + 1, j);		
 	    } else {
@@ -676,8 +551,8 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
 		vS = 0.75 * velTheta->getCPUValueAt(i, j - 1) -
 		    0.25 * velTheta->getCPUValueAt(oppositei, j - 1);
 	    }
-	    float u = 0.5 * (uW + uE);
-	    float v = 0.5 * (vN + vS);
+	    fReal u = 0.5 * (uW + uE);
+	    fReal v = 0.5 * (vN + vS);
 # ifdef WRITE_TXT
 	    ofu << u << " ";
 	    ofv << v << " ";
@@ -705,9 +580,9 @@ void KaminoSolver::write_velocity_image(const std::string& s, const int frame) {
 	    }
 		
 	    // std::cout << "theta " << j << " phi " << i << " u " << u << " v " << v << std::endl;
-	    images[0][j*nPhi+i] = u/2+0.5; // R
-	    images[1][j*nPhi+i] = v/2+0.5; // G
-	    images[2][j*nPhi+i] = 0.5; // B
+	    images[0][j*nPhi+i] = float(u/2+0.5); // R
+	    images[1][j*nPhi+i] = float(v/2+0.5); // G
+	    images[2][j*nPhi+i] = float(0.5); // B
 	}
 # ifdef WRITE_TXT
 	ofu << std::endl;
@@ -747,7 +622,7 @@ void KaminoSolver::write_concentration_image(const std::string& s, const int fra
 
     for (size_t j = 0; j < nTheta; ++j) {
 	for (size_t i = 0; i < nPhi; ++i) {
-	    float con = surfConcentration->getCPUValueAt(i, j);
+	    fReal con = surfConcentration->getCPUValueAt(i, j);
 	  
 	    images[0][j*nPhi+i] = (con - 0.9) / 0.2;
 	    images[1][j*nPhi+i] = (con - 0.9) / 0.2;
@@ -805,16 +680,16 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
     // 	    (thicknessFull, thickness->getGPUThisStep(), weightFull, thickness->getThisStepPitchInElements());
     // 	checkCudaErrors(cudaGetLastError());
     // 	checkCudaErrors(cudaDeviceSynchronize());
-    // 	cudaMemcpy(thicknessFullCPU, thicknessFull, (cols * rows) * sizeof(float), cudaMemcpyDeviceToHost);
+    // 	cudaMemcpy(thicknessFullCPU, thicknessFull, (cols * rows) * sizeof(fReal), cudaMemcpyDeviceToHost);
 
-    // 	std::vector<float> images[3];
+    // 	std::vector<fReal> images[3];
     // 	images[0].resize(cols * rows);
     // 	images[1].resize(cols * rows);
     // 	images[2].resize(cols * rows);
 
     // 	for (size_t j = 0; j < rows; ++j) {
     // 	    for (size_t i = 0; i < cols; ++i) {
-    // 		float Delta = thicknessFullCPU[j * cols + i];
+    // 		fReal Delta = thicknessFullCPU[j * cols + i];
     // 		if (Delta < 0) { 
     // 		    this->setBroken(true);
     // 		    return;
@@ -838,12 +713,12 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 	images[1].resize(nPhi * nTheta);
 	images[2].resize(nPhi * nTheta);
 
-	float minE = 1.f;
-	float ratio = 2e5; // * 10
+	fReal minE = 1.0;
+	fReal ratio = 2e5; // * 10
 
 	for (size_t j = 0; j < nTheta; ++j) {
 	    for (size_t i = 0; i < nPhi; ++i) {
-		float Delta = thickness->getCPUValueAt(i, j);
+		fReal Delta = thickness->getCPUValueAt(i, j);
 		if (Delta < 0) {
 		    this->setBroken(true);
 		}    //		    return;
@@ -873,6 +748,6 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
 }
 
 
-float KaminoSolver::getGridLen() {
+fReal KaminoSolver::getGridLen() {
     return this->gridLen;
 }

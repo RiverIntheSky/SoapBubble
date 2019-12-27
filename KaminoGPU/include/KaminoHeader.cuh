@@ -37,10 +37,6 @@
 # define vThetaPhiOffset 0.0
 # define vThetaThetaOffset 1.0
 
-# define centeredOffset make_float2(0.5f, 0.f) // (theta, phi)
-# define centeredOffsetd make_double2(0.5, 0.0) // (theta, phi)
-# define vPhiOffset make_float2(0.5f, -0.5f)
-# define vThetaOffset make_float2(1.f, 0.f)
 
 //# define getIndex(phi, theta) (theta * this->nPhi + phi)
 
@@ -48,7 +44,40 @@
 # define greatCircle
 
 // The solution to switch between double and float
+// # define USEFLOAT
+
+# ifdef USEFLOAT
 typedef float fReal;
+typedef float2 fReal2;
+typedef float3 fReal3;
+static __inline__ __host__ __device__ float2 make_fReal2(float a, float b) {
+    return make_float2(a, b);
+}
+
+
+static __inline__ __host__ __device__ float3 make_fReal3(float a, float b, float c) {
+    return make_float3(a, b, c);
+}
+
+# else
+typedef double fReal;
+typedef double2 fReal2;
+typedef double3 fReal3;
+static __inline__ __host__ __device__ double2 make_fReal2(double a, double b) {
+    return make_double2(a, b);
+}
+
+
+static __inline__ __host__ __device__ double3 make_fReal3(double a, double b, double c) {
+    return make_double3(a, b, c);
+}
+
+
+# endif
+# define centeredOffset make_fReal2((fReal)0.5, (fReal)0.0) // (theta, phi)
+# define vPhiOffset make_fReal2((fReal)0.5, (fReal)-0.5)
+# define vThetaOffset make_fReal2((fReal)1.0, (fReal)0.0)
+
 typedef cufftComplex ComplexFourier;
 
 const size_t byte2Bits = 8;
@@ -75,17 +104,15 @@ enum Coord { phi, theta };
 # define PERFORMANCE_BENCHMARK
 # define TINYEXR_IMPLEMENTATION
 # define sphere
-// # define gravity
-# define tiltedGravity
+# define gravity
+// # define tiltedGravity
 
 // if both gravity and tilted are defined, tilted has priority
 # ifdef tiltedGravity
 # undef gravity
 # endif
 
-# define air
-// # define uair
 # define evaporation -0.000000008
-// # define vair // TODO: delete
+# define air
 # define WRITE_TXT
 # define BIMOCQ

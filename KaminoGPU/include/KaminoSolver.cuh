@@ -6,13 +6,12 @@
 # include "../include/KaminoParticles.cuh"
 # include <iomanip>
 
-extern __constant__ float invGridLenGlobal;
+extern __constant__ fReal invGridLenGlobal;
 
-__device__ float kaminoLerp(float from, float to, float alpha);
-__device__ float sampleCentered(float* input, float2 rawId, size_t pitch);
-__global__ void resetThickness(float2* weight);
+__device__ fReal kaminoLerp(fReal from, fReal to, fReal alpha);
+__device__ fReal sampleCentered(fReal* input, fReal2 rawId, size_t pitch);
 __global__ void initLinearSystem(int* row_ptr, int* col_ind);
-__global__ void initMapping(float* map_theta, float* map_phi);
+__global__ void initMapping(fReal* map_theta, fReal* map_phi);
 
 class KaminoSolver
 {
@@ -22,40 +21,17 @@ private:
 
     KaminoParticles* particles;
     size_t particleDensity;
-
-    // Buffer for U, the fouriered coefs
-    // This pointer's for the pooled global memory (nTheta by nPhi)
-    ComplexFourier* gpuUFourier;
-    float* gpuUReal;
-    float* gpuUImag;
-
-    // Buffer for V, the fouriered coefs
-    // This pointer's for the pooled global memory as well
-    ComplexFourier* gpuFFourier;
-    float* gpuFReal;
-    float* gpuFImag;
-    float* gpuFZeroComponent;
-    
+  
     // Buffer for elements that can be preallocated
-    float* div;
-    float2* weight;
+    fReal* div;
+    fReal2* weight;
 
     // original resolution
-    float2* weightFull;
-    float* thicknessFull;
-    float* thicknessFullCPU;
+    fReal2* weightFull;
+    fReal* thicknessFull;
+    fReal* thicknessFullCPU;
     int cols;
     int rows;
-
-    /// Precompute these!
-    // nPhi by nTheta elements, but they should be retrieved by shared memories
-    // in the TDM kernel we solve nTheta times with each time nPhi elements.
-    float* gpuA;
-    // Diagonal elements b (major diagonal);
-    float* gpuB;
-    // Diagonal elements c (upper);
-    float* gpuC;
-    void precomputeABCCoef();
 
     /* Grid dimensions */
     size_t nPhi;
@@ -64,46 +40,31 @@ private:
     size_t nThreadxMax;
     int device;
     /* Radius of sphere */
-    float radius;
+    fReal radius;
     /* Inverted radius of sphere */
-    float invRadius;
+    fReal invRadius;
     /* Grid size */
-    float gridLen;
+    fReal gridLen;
     /* Inverted grid size*/
-    float invGridLen;
+    fReal invGridLen;
     /* Whether film is broken */
     bool broken = false;
 
     /* airflow */
-    float *uair, *vair;
-
-    /* harmonic coefficients for velocity field initializaton */
-    //    int B, C, D, E;
+    fReal *uair, *vair;
 
     /* average film thickness */
-    float H;
+    fReal H;
     /* expansion parameter */
-    float epsilon;
+    fReal epsilon;
 
     /* cuSPARSE and cuBLAS*/
     int N;
     int nz;
-    cublasHandle_t cublasHandle;
-    cusparseHandle_t cusparseHandle;
-    cusparseDnVecDescr_t vecR, vecX, vecP, vecO;
-    /* Description of the A matrix*/
-    cusparseMatDescr_t descrA;
     
-    const float zero = 0.f;
-    const float one = 1.f;
-    const float minusone = -1.f;
-    float r0, r1, beta, alpha, nalpha, dot;
-
-    float *d_r, *d_p, *d_omega, *d_x;
+    fReal *d_r, *d_p, *d_omega, *d_x;
     int *row_ptr, *col_ind;
-    float *rhs, *val;
-
-    cusparseSpMatDescr_t matM; /* pre-conditioner */
+    fReal *rhs, *val;
 
     BimocqQuantity* velTheta;
     BimocqQuantity* velPhi; // u_phi/(sin(theta)) is stored instead of u_phi
@@ -117,12 +78,12 @@ private:
     void copyDensityBack2CPU();
 
     /* Something about time steps */
-    float timeStep;
-    float timeElapsed;
+    fReal timeStep;
+    fReal timeElapsed;
 
-    float advectionTime;
-    float bodyforceTime;
-    float CGTime;
+    fReal advectionTime;
+    fReal bodyforceTime;
+    fReal CGTime;
 
     /* AMGX */
     AMGX_Mode mode;
@@ -136,10 +97,10 @@ private:
 
     /* AMGCL */
     std::vector<int> ptr, col;
-    std::vector<float> val_cpu, rhs_cpu, xx;
+    std::vector<fReal> val_cpu, rhs_cpu, xx;
 
     /* Bimocq mapping buffers */
-    float *forward_p, *forward_t,
+    fReal *forward_p, *forward_t,
 	*backward_p, *backward_t,
 	*backward_pprev, *backward_tprev,
 	*tmp_p, *tmp_t;
@@ -148,7 +109,7 @@ private:
     /// Kernel calling from here
     void advection();
     void bodyforce();
-    void conjugateGradient();
+    //    void conjugateGradient();
     void AlgebraicMultiGridCG();
     void AMGCLSolve();
 
@@ -158,36 +119,30 @@ private:
     /* distribute initial velocity values at grid points */
     void initialize_velocity();
 	
-    /* FBM noise function for velocity distribution */
-    float FBM(const float x, const float y);
-    /* 2D noise interpolation function for smooth FBM noise */
-    float interpNoise2D(const float x, const float y) const;
-    /* returns a pseudorandom number between -1 and 1 */
-    float rand(const vec2 vecA) const;
     /* determine the layout of the grids and blocks */
     void determineLayout(dim3& gridLayout, dim3& blockLayout,
 			 size_t nRow_theta, size_t nCol_phi);
 public:
-    KaminoSolver(size_t nPhi, size_t nTheta, float radius, float frameDuration,
-		 float H, int device, std::string AMGconfig, size_t particleDensity);
+    KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal frameDuration,
+		 fReal H, int device, std::string AMGconfig, size_t particleDensity);
     ~KaminoSolver();
 
-    void initWithConst(KaminoQuantity* attrib, float val);
-    void initWithConst(BimocqQuantity* attrib, float val);
+    void initWithConst(KaminoQuantity* attrib, fReal val);
+    void initWithConst(BimocqQuantity* attrib, fReal val);
     void initThicknessfromPic(std::string path);
     void initParticlesfromPic(std::string path, size_t parPergrid);
 
-    void copyToCPU(KaminoQuantity* quantity, float* cpubuffer);
-    float maxAbsDifference(const float* A, const float* B, const size_t& size);
-    void adjustStepSize(float& timeStep, const float& U, const float& eps);
-    void stepForward(float timeStep);
+    void copyToCPU(KaminoQuantity* quantity, fReal* cpubuffer);
+    fReal maxAbsDifference(const fReal* A, const fReal* B, const size_t& size);
+    void adjustStepSize(fReal& timeStep, const fReal& U, const fReal& eps);
+    void stepForward(fReal timeStep);
     void stepForward();
-    float getGridLen();
+    fReal getGridLen();
     bool isBroken();
     void setBroken(bool broken);
 
     /* help functions */
-    float maxAbs(float* array, size_t nTheta, size_t nPhi);
+    fReal maxAbs(fReal* array, size_t nTheta, size_t nPhi);
     void write_thickness_img(const std::string& s, const int frame);
     // void write_data_bgeo(const std::string& s, const int frame);
     void write_image(const std::string& s, size_t width, size_t height, std::vector<float> *images);
@@ -200,20 +155,19 @@ public:
 			       size_t pitch);
 
     /* Bimocq */
-    void updateForward(float dt, float* &fwd_t, float* &fwd_p);
-    void updateBackward(float dt, float* &bwd_t, float* &bwd_p);
-    float estimateDistortion();
+    void updateForward(fReal dt, fReal* &fwd_t, fReal* &fwd_p);
+    void updateBackward(fReal dt, fReal* &bwd_t, fReal* &bwd_p);
+    fReal estimateDistortion();
     void reInitializeMapping();
-    void correctMapping();
     bool validateCoord(double2& Id);
 
     int count = 0;
 
     // TODO: delete
     /* CFL */
-    float cfldt;
-    float maxu;
-    float maxv;
+    fReal cfldt;
+    fReal maxu;
+    fReal maxv;
 
 };
 
