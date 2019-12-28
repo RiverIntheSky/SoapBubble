@@ -168,7 +168,6 @@ public:
     fReal cfldt;
     fReal maxu;
     fReal maxv;
-
 };
 
 

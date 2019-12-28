@@ -7,10 +7,6 @@ const int fftRank = 1;
 static const int m = 3;
 static __constant__ size_t nPhiGlobal;
 static __constant__ size_t nThetaGlobal;
-static __constant__ fReal gridLenGlobal;
-static __constant__ int Cols;
-static __constant__ int Rows;
-static __constant__ int Ratio;
 
 
 __global__ void initMapping(fReal* map_theta, fReal* map_phi){
@@ -32,8 +28,6 @@ __global__ void initLinearSystem(int* row_ptr, int* col_ind) {
     if (idx > nPhiGlobal * nThetaGlobal) return;
     int idx5 = 5 * idx;
     row_ptr[idx] = idx5;
-
-    int n = nPhiGlobal * nThetaGlobal;
     
     if (idx < nPhiGlobal * nThetaGlobal) {
 	// up
@@ -80,7 +74,7 @@ KaminoSolver::KaminoSolver(size_t nPhi, size_t nTheta, fReal radius, fReal dt,
     cudaDeviceProp deviceProp;
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, device));
     // otherwise no enough resource
-    this->nThreadxMax = std::min(deviceProp.maxThreadsDim[0], 128);
+    this->nThreadxMax = std::min(deviceProp.maxThreadsDim[0], 256);
 
     checkCudaErrors(cudaMalloc((void **)(&div),
 			       sizeof(fReal) * N));
@@ -394,7 +388,7 @@ void KaminoSolver::stepForward() {
     timer.startTimer();
 # endif
 # ifdef BIMOCQ
-    updateCFL();
+    //    updateCFL();
     updateForward(this->timeStep, forward_t, forward_p);
     updateBackward(this->timeStep, backward_t, backward_p);
 # endif

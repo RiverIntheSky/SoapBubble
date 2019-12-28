@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 3.0)
 # Project title
 project(Kamino)
 
+set(CMAKE_BUILD_TYPE Release)
 include_directories(./ ./include/ ${PROJECT_SOURCE_DIR}/)
 include_directories(cuda_util_headers)
 include_directories(opencv_headers)
@@ -26,7 +27,7 @@ link_directories(/opt/cuda/lib64)
 set(CUDA_HOST_COMPILER  /usr/bin/cc)
 set(CUDA_SEPARABLE_COMPILATION ON)
 
-set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-g -G -use_fast_math -gencode arch=compute_61,code=sm_61;)
+set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-use_fast_math -gencode arch=compute_61,code=sm_61;)
 message("arch=61")
 
 find_package(Boost COMPONENTS filesystem REQUIRED)

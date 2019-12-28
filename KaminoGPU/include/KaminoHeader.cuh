@@ -116,3 +116,4 @@ enum Coord { phi, theta };
 # define air
 # define WRITE_TXT
 # define BIMOCQ
+// # define MULTISAMPLE
