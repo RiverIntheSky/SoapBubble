@@ -1545,21 +1545,21 @@ __global__ void concentrationLinearSystemKernel
     	 sinThetaNorth * sinThetaNorth / (invDt + CrGlobal / etaUp));
 # else
 # ifdef tiltedGravity
-    // sinThetaDiv += 0.57735026919 * gGlobal * invGridLenGlobal *
-    // 	((cosf(gPhi + halfStep) - sinf(gPhi + halfStep)) * etaRight
-    // 	 / (invDt * etaRight + CrGlobal) -
-    // 	 (cosf(gPhi - halfStep) - sinf(gPhi - halfStep)) * etaLeft
-    // 	 / (invDt * etaLeft + CrGlobal) +
-    // 	 (cosf(gTheta + halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaSouth)
-    // 	 / (invDt * etaDown + CrGlobal) * sinThetaSouth * etaDown -
-    // 	 (cosf(gTheta - halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaNorth)
-    // 	 / (invDt * etaUp + CrGlobal) * sinThetaNorth * etaUp);
+    sinThetaDiv += 0.57735026919 * gGlobal * invGridLenGlobal *
+    	((cosf(gPhi + halfStep) - sinf(gPhi + halfStep)) * etaRight
+    	 / (invDt * etaRight + CrGlobal) -
+    	 (cosf(gPhi - halfStep) - sinf(gPhi - halfStep)) * etaLeft
+    	 / (invDt * etaLeft + CrGlobal) +
+    	 (cosf(gTheta + halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaSouth)
+    	 / (invDt * etaDown + CrGlobal) * sinThetaSouth * etaDown -
+    	 (cosf(gTheta - halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaNorth)
+    	 / (invDt * etaUp + CrGlobal) * sinThetaNorth * etaUp);
 
-    sinThetaDiv += gGlobal * invGridLenGlobal *
-     	 (sinThetaSouth * cosf(gTheta + halfStep) * sinf(gPhi) / (invDt + CrGlobal / etaDown) -
-     	  sinThetaNorth * cosf(gTheta - halfStep) * sinf(gPhi) / (invDt + CrGlobal / etaUp) +
-     	  cosf(gPhi + halfStep) / (invDt + CrGlobal / etaRight) -
-     	  cosf(gPhi - halfStep) / (invDt + CrGlobal / etaLeft));
+    // sinThetaDiv += gGlobal * invGridLenGlobal *
+    //  	 (sinThetaSouth * cosf(gTheta + halfStep) * sinf(gPhi) / (invDt + CrGlobal / etaDown) -
+    //  	  sinThetaNorth * cosf(gTheta - halfStep) * sinf(gPhi) / (invDt + CrGlobal / etaUp) +
+    //  	  cosf(gPhi + halfStep) / (invDt + CrGlobal / etaRight) -
+    //  	  cosf(gPhi - halfStep) / (invDt + CrGlobal / etaLeft));
 
     // sinThetaDiv += gGlobal * invGridLenGlobal *
     // 	 (sinThetaSouth * cosf(gTheta + halfStep) * cosf(gPhi) / (invDt + CrGlobal / etaDown) -
@@ -1681,8 +1681,8 @@ __global__ void applyforcevelthetaKernel
 # endif
 # endif
 # ifdef tiltedGravity
-    //    f3 = 0.57735026919 * (cosf(gTheta)*(cosf(gPhi) + sinf(gPhi))+sinf(gTheta)) * gGlobal;
-    f3 = cosf(gTheta) * sinf(gPhi) * gGlobal;
+    f3 = 0.57735026919 * (cosf(gTheta)*(cosf(gPhi) + sinf(gPhi))+sinf(gTheta)) * gGlobal;
+    // f3 = cosf(gTheta) * sinf(gPhi) * gGlobal;
     // f3 = cosf(gTheta) * cosf(gPhi) * gGlobal;
 # endif
 
@@ -1751,8 +1751,8 @@ __global__ void applyforcevelphiKernel
     fReal f2 = CrGlobal * invEta * uAir;
     fReal f3 = 0.0;
 # ifdef tiltedGravity
-    //    f3 = 0.57735026919 * (cosf(gPhi) - sinf(gPhi)) * gGlobal;
-    f3 = cosf(gPhi) * gGlobal;
+    f3 = 0.57735026919 * (cosf(gPhi) - sinf(gPhi)) * gGlobal;
+    // f3 = cosf(gPhi) * gGlobal;
     // f3 = -sinf(gPhi) * gGlobal;
 # endif
 

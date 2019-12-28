@@ -96,16 +96,16 @@ enum gridType { FLUIDGRID, SOLIDGRID };
 
 enum Coord { phi, theta };
 
-# define WRITE_VELOCITY_DATA
+// # define WRITE_VELOCITY_DATA
 // # define WRITE_PARTICLES
 # define WRITE_THICKNESS_DATA
-# define WRITE_CONCENTRATION_DATA
+// # define WRITE_CONCENTRATION_DATA
 # define RUNGE_KUTTA
 # define PERFORMANCE_BENCHMARK
 # define TINYEXR_IMPLEMENTATION
 # define sphere
-# define gravity
-// # define tiltedGravity
+// # define gravity
+# define tiltedGravity
 
 // if both gravity and tilted are defined, tilted has priority
 # ifdef tiltedGravity
@@ -114,6 +114,6 @@ enum Coord { phi, theta };
 
 # define evaporation -0.000000008
 # define air
-# define WRITE_TXT
+// # define WRITE_TXT
 # define BIMOCQ
-// # define MULTISAMPLE
+# define MULTISAMPLE

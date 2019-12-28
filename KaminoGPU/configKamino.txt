@@ -7,12 +7,13 @@ T 298.15
 Ds 0.0
 rm 0.000000005
 numberOfGridsInTheta 1024
-timePerStep 0.001
-timePerFrame 0.025
+timePerStep 0.002
+timePerFrame 0.04
 frameNumbers 1000
-outputDir ../out/oneSample
+outputDir ../out/multiSample
 thicknessInit ../init/thickness1024.exr
 AMGconfig ../init/PCGF_F.json
 blendCoeff 0.4
 particleDensity 0
-gpu 0
+gpu 1
+
