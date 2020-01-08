@@ -73,6 +73,8 @@ private:
     int device;			// which gpu device to use
     std::string AMGconfig;	// AMGX config file
     fReal blendCoeff;
+    fReal gammaMax;		// max soap concentration,
+				// corresponds to zero surface tension
 
 public:
     Kamino(fReal radius = 0.05, fReal H = 0.0000005, fReal U = 1.0, fReal c_m = 0.5,
@@ -81,7 +83,7 @@ public:
 	   fReal DT = 1.0 / 24.0, int frames = 1000,
 	   std::string outputDir = "../output/test/",
 	   std::string thicknessImage = "", size_t particleDensity = 8, int device = 0,
-	   std::string AMGconfig = "", fReal blendCoeff = 0.5f);
+	   std::string AMGconfig = "", fReal blendCoeff = 0.5);
     ~Kamino();
 
     /* run the solver */

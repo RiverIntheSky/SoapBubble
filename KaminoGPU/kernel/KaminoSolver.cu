@@ -418,6 +418,27 @@ void KaminoSolver::copyVelocityBack2CPU()
 {
     this->velPhi->copyBackToCPU();
     this->velTheta->copyBackToCPU();
+    // check if film is broken
+    setBroken(true);
+    for (size_t i = 0; i < this->velPhi->getNPhi(); ++i) {
+	for (size_t j = 0; j < this->velPhi->getNTheta(); ++j) {
+	    fReal val = this->velPhi->getCPUValueAt(i, j);
+	    if (!isnan(val)) {
+		setBroken(false);
+		goto finish;
+	    }
+	}
+    }
+    for (size_t i = 0; i < this->velTheta->getNPhi(); ++i) {
+	for (size_t j = 0; j < this->velTheta->getNTheta(); ++j) {
+	    fReal val = this->velTheta->getCPUValueAt(i, j);
+	    if (!isnan(val)) {
+		setBroken(false);
+		goto finish;
+	    }
+	}
+    }
+    finish:
 }
 
 
@@ -647,98 +668,49 @@ void KaminoSolver::write_thickness_img(const std::string& s, const int frame)
     mat_string.append(".txt");
 
     std::ofstream of(mat_string);
-    std::ofstream thick;
-    thick.open("thickness.txt", std::ofstream::out | std::ofstream::app);
 # endif
+    std::ofstream thick;
+    thick.open("thickness1024_vdw.txt", std::ofstream::out | std::ofstream::app);
 
     img_string.append(".exr");
-    //    if (frame != 0) {
-    // if (false) {
-    // 	dim3 gridLayout;
-    // 	dim3 blockLayout;
-    // 	determineLayout(gridLayout, blockLayout, rows, cols);
-    // 	resetThickness<<<gridLayout, blockLayout>>>(weightFull);
-    // 	checkCudaErrors(cudaGetLastError());
-    // 	checkCudaErrors(cudaDeviceSynchronize());
-	
-    //     if (particles->numOfParticles > 0) {
-    // 	    determineLayout(gridLayout, blockLayout, 2, particles->numOfParticles);
-    // 	    upsampleParticles<<<gridLayout, blockLayout>>>
-    // 		(particles->coordGPUThisStep, particles->value, weightFull, particles->numOfParticles);
-    // 	    checkCudaErrors(cudaGetLastError());
-    // 	    checkCudaErrors(cudaDeviceSynchronize());
-    // 	}
-	
-    // 	determineLayout(gridLayout, blockLayout, rows, cols);
-    // 	normalizeThickness<<<gridLayout, blockLayout>>>
-    // 	    (thicknessFull, thickness->getGPUThisStep(), weightFull, thickness->getThisStepPitchInElements());
-    // 	checkCudaErrors(cudaGetLastError());
-    // 	checkCudaErrors(cudaDeviceSynchronize());
-    // 	cudaMemcpy(thicknessFullCPU, thicknessFull, (cols * rows) * sizeof(fReal), cudaMemcpyDeviceToHost);
+    thickness->copyBackToCPU();
 
-    // 	std::vector<fReal> images[3];
-    // 	images[0].resize(cols * rows);
-    // 	images[1].resize(cols * rows);
-    // 	images[2].resize(cols * rows);
+    std::vector<float> images[3];
+    images[0].resize(nPhi * nTheta);
+    images[1].resize(nPhi * nTheta);
+    images[2].resize(nPhi * nTheta);
 
-    // 	for (size_t j = 0; j < rows; ++j) {
-    // 	    for (size_t i = 0; i < cols; ++i) {
-    // 		fReal Delta = thicknessFullCPU[j * cols + i];
-    // 		if (Delta < 0) { 
-    // 		    this->setBroken(true);
-    // 		    return;
-    // 		} else {
-    // 		    images[0][j * cols + i] = Delta * this->H * 5e5;
-    // 		    images[1][j * cols + i] = Delta * this->H * 5e5;
-    // 		    images[2][j * cols + i] = Delta * this->H * 5e5; // *4
-    // 		    of << Delta * this->H * 2<< " ";
-    // 		}
-    // 	    }
-    // 	    of << std::endl;
-    // 	}
-
-    // 	write_image(img_string, cols, rows, images);
-    // } else 
-    {
-	thickness->copyBackToCPU();
-
-	std::vector<float> images[3];
-	images[0].resize(nPhi * nTheta);
-	images[1].resize(nPhi * nTheta);
-	images[2].resize(nPhi * nTheta);
-
-	fReal minE = 1.0;
-	fReal ratio = 2e5; // * 10
-
-	for (size_t j = 0; j < nTheta; ++j) {
-	    for (size_t i = 0; i < nPhi; ++i) {
-		fReal Delta = thickness->getCPUValueAt(i, j);
-		if (Delta < 0) {
-		    this->setBroken(true);
-		}    //		    return;
-		//} else {
-		if (Delta < minE)
-		    minE = Delta;
-		images[0][j*nPhi+i] = Delta * this->H * ratio;
-		images[1][j*nPhi+i] = Delta * this->H * ratio;
-		images[2][j*nPhi+i] = Delta * this->H * ratio;
+    fReal minE = 1.0;
+    fReal ratio = 2e5; // * 10
+    this->setBroken(true);
+    for (size_t j = 0; j < nTheta; ++j) {
+	for (size_t i = 0; i < nPhi; ++i) {
+	    fReal Delta = thickness->getCPUValueAt(i, j);
+	    if (Delta > 0) {
+		this->setBroken(false);
+	    }    //		    return;
+	    //} else {
+	    if (Delta < minE)
+		minE = Delta;
+	    images[0][j*nPhi+i] = Delta * this->H * ratio;
+	    images[1][j*nPhi+i] = Delta * this->H * ratio;
+	    images[2][j*nPhi+i] = Delta * this->H * ratio;
 # ifdef WRITE_TXT
-		of << Delta * this->H * 2 << " ";
+	    of << Delta * this->H * 2 << " ";
 # endif
-		//}
-	    }
-# ifdef WRITE_TXT
-	    of << std::endl;
-# endif
+	    //}
 	}
 # ifdef WRITE_TXT
-	thick << minE << std::endl;
-	thick.close();
+	of << std::endl;
 # endif
+    }
+    // # ifdef WRITE_TXT
+    thick << minE << std::endl;
+    thick.close();
+    //# endif
 
-	write_image(img_string, nPhi, nTheta, images);
-	//	std::cout << "min thickness " << minE << std::endl;
-    }    
+    write_image(img_string, nPhi, nTheta, images);
+    std::cout << "min thickness " << minE << std::endl;
 }
 
 

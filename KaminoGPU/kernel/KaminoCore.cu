@@ -33,9 +33,11 @@ static __constant__ fReal blend_coeff;
 static __constant__ fReal evaporationRate;
 static __constant__ fReal W1;
 static __constant__ fReal W2;
+static __constant__ fReal gammaMaxGlobal;
 
 
-# define eps 1e-5
+# define thresh 0.0
+# define eps 1e-7
 # define MAX_BLOCK_SIZE 8192 /* TODO: deal with larger resolution */
 
 
@@ -179,6 +181,10 @@ __device__ void validateId(int2& Id) {
  */
 __device__ fReal kaminoLerp(fReal from, fReal to, fReal alpha)
 {
+    if (isnan(from))
+	return to;
+    if (isnan(to))
+	return from;
     return (1.0 - alpha) * from + alpha * to;
 }
 
@@ -697,7 +703,7 @@ __global__ void advectionVSpherePhiKernel
 	u_ = normalize(u);
         v_ = cross(w_, u_);
     } else {
-	velPhiOutput[thetaId * pitch + phiId] = 0.0;
+	at(velPhiOutput, thetaId, phiId, pitch) = u_norm; // 0 or NaN
 	return;
     }
 	
@@ -741,7 +747,7 @@ __global__ void advectionVSpherePhiKernel
 	u_ = normalize(u);
         v_ = cross(w_, u_);
     } else {
-	at(velPhiOutput, thetaId, phiId, pitch) = 0.0;
+	at(velPhiOutput, thetaId, phiId, pitch) = u_norm; // 0 or NaN
 	return;
     }
 
@@ -833,7 +839,7 @@ __global__ void advectionVSphereThetaKernel
 	u_ = normalize(u);
         v_ = cross(w_, u_);
     } else {
-	velThetaOutput[thetaId * pitch + phiId] = 0.0;
+	at(velThetaOutput, thetaId, phiId, pitch) = u_norm; // 0 or NaN
 	return;
     }
 
@@ -877,7 +883,7 @@ __global__ void advectionVSphereThetaKernel
 	u_ = normalize(u);
         v_ = cross(w_, u_);
     } else {
-	at(velThetaOutput, thetaId, phiId, pitch) = 0.0;
+	at(velThetaOutput, thetaId, phiId, pitch) = u_norm; // 0 or NaN
 	return;
     }
     
@@ -1019,8 +1025,6 @@ __global__ void advectionAllCentered
 	= sampleCentered(thicknessInput, traceId, pitch);
     at(gammaOutput, thetaId, phiId, pitch)
 	= sampleCentered(gammaInput, traceId, pitch);
-    // if (thetaId < 5)
-    // 	printf("thetaId %d %d traceId %f %f\n", thetaId, phiId, traceId.x, traceId.y);
 }
 
 
@@ -1040,6 +1044,11 @@ __global__ void advectionCenteredBimocq
     fReal2 gId = make_fReal2((fReal)thetaId, (fReal)phiId) + centeredOffset;
     
     fReal thickness = 0.0;
+    if (at(thicknessInput, thetaId, phiId, pitch) == thresh) {
+	at(thicknessOutput, thetaId, phiId, pitch) = thresh;
+	return;
+    }
+
 # ifdef MULTISAMPLE
     int samples = 5;
     fReal w[5] = {0.125, 0.125, 0.125, 0.125, 0.5};
@@ -1064,7 +1073,7 @@ __global__ void advectionCenteredBimocq
 	thickness += blend_coeff * w[i] * (sampleCentered(thicknessInit, initPosId, pitch) +
 					   sampleCentered(thicknessDelta, initPosId, pitch));
     }
-    at(thicknessOutput, thetaId, phiId, pitch) = thickness;
+    at(thicknessOutput, thetaId, phiId, pitch) = fmax(thresh, thickness);
 }
 
 
@@ -1242,7 +1251,7 @@ void KaminoSolver::updateCFL(){
     this->maxv = maxAbs(velTheta->getGPUThisStep(), velTheta->getNTheta(),
 			velTheta->getThisStepPitchInElements());
 
-    this->cfldt = gridLen / std::max(std::max(maxu, maxv), (fReal)eps);
+    this->cfldt = gridLen / std::max(std::max(maxu, maxv), eps);
     // std::cout << "this->timeStep " << this->timeStep;
     // std::cout << "max traveled distance " << std::max(maxu, maxv) * this->timeStep;
     // std::cout << "max traveled grids " << std::max(maxu, maxv) * this->timeStep / (radius * gridLen);
@@ -1329,9 +1338,7 @@ void KaminoSolver::advection()
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
-
     thickness->swapGPUBuffer();	
-	
     surfConcentration->swapGPUBuffer();
     swapVelocityBuffers();
 }
@@ -1413,8 +1420,14 @@ __global__ void divergenceKernel_fromGamma(fReal* div, fReal* gammaNext, fReal* 
 
     fReal gamma_a = gammaThis[thetaId * pitch + phiId];
     fReal gamma = gammaNext[thetaId * pitch + phiId];
-
-    div[thetaId * nPhiGlobal + phiId] = (1 - gamma / gamma_a) / timeStepGlobal;
+    if (gamma <= 0.0 || gamma > gammaMaxGlobal - eps) {
+	// film broken
+	gammaNext[thetaId * pitch + phiId] = gammaMaxGlobal;
+	at(div, thetaId, phiId) = 1.0 / timeStepGlobal;
+    } else {
+	gamma = fmin(gamma, 2 * gamma_a); // TODO: clamp??
+	at(div, thetaId, phiId) = (1.0 - gamma / gamma_a) / timeStepGlobal;
+    }
 }
 
 
@@ -1433,6 +1446,18 @@ __global__ void concentrationLinearSystemKernel
     int idx5 = 5 * idx;
 
     fReal gamma = at(gamma_a, thetaId, phiId, pitch);
+    fReal eta = at(eta_a, thetaId, phiId, pitch);
+    if (gamma > (gammaMaxGlobal - eps) || eta == thresh) {
+	// force gamma_next = gammaMaxGlobal
+	val[idx5] = 0.0;	// up
+	val[idx5 + 1] = 0.0;	// left
+	val[idx5 + 3] = 0.0;    // right
+	val[idx5 + 4] = 0.0;    // down
+	val[idx5 + 2] = 1.0;    // center
+	rhs[idx] = gammaMaxGlobal;
+	at(gamma_a, thetaId, phiId, pitch) = gammaMaxGlobal;
+	return;
+    }
     fReal invDt = 1.0 / timeStepGlobal;
 
     fReal gTheta = ((fReal)thetaId + centeredThetaOffset) * gridLenGlobal;
@@ -1447,20 +1472,24 @@ __global__ void concentrationLinearSystemKernel
     // neighboring values
     int phiIdEast = (phiId + 1) % nPhiGlobal;
     int phiIdWest = (phiId - 1 + nPhiGlobal) % nPhiGlobal;
-    fReal eta = at(eta_a, thetaId, phiId, pitch);
+
     fReal etaWest = at(eta_a, thetaId, phiIdWest, pitch);
+
     fReal etaEast = at(eta_a, thetaId, phiIdEast, pitch);
+
     fReal etaNorth = 0.0;
+
     fReal etaSouth = 0.0;
+
     fReal WMid = at(W, thetaId, phiId, pitch);
     fReal WWest = at(W, thetaId, phiIdWest, pitch);
     fReal WEast = at(W, thetaId, phiIdEast, pitch);
+
     fReal WNorth = 0.0;
     fReal WSouth = 0.0;
     fReal uWest = at(velPhi_a, thetaId, phiId, pitch);
     fReal uEast = at(velPhi_a, thetaId, phiIdEast, pitch);
-    fReal vWest = sampleVTheta(velTheta_a, make_fReal2(gTheta, gPhi - halfStep), pitch);
-    fReal vEast = sampleVTheta(velTheta_a, make_fReal2(gTheta, gPhi + halfStep), pitch);
+
     fReal vNorth = 0.0;
     fReal vSouth = 0.0;
     fReal uAirWest = at(uair, thetaId, phiId);
@@ -1489,8 +1518,15 @@ __global__ void concentrationLinearSystemKernel
     	etaSouth = at(eta_a, thetaId, oppositePhiId, pitch);
 	WSouth = at(W, thetaId, oppositePhiId, pitch);
     }
+    if (isnan(vNorth))
+	vNorth = 0.0;
+    if (isnan(vSouth))
+	vSouth = 0.0;
+    if (isnan(uWest))
+	uWest = 0.0;
+    if (isnan(uEast))
+	uEast = 0.0;
     // at both poles sin(theta) = 0;
-
     // constant for this grid
     fReal CrDt = CrGlobal * timeStepGlobal; // Cr\Delta t
     fReal MDt = MGlobal * timeStepGlobal; // M\Delta t
@@ -1513,7 +1549,7 @@ __global__ void concentrationLinearSystemKernel
     val[idx5 + 4] = -s2 * sinThetaSouth * MDt / (etaDown + CrDt);
 
     // center
-    val[idx5 + 2] = sinTheta / gamma * invDt
+    val[idx5 + 2] = sinTheta * invDt / gamma
 	- (val[idx5] + val[idx5 + 1] + val[idx5 + 3] + val[idx5 + 4]);
  
     // rhs
@@ -1541,25 +1577,27 @@ __global__ void concentrationLinearSystemKernel
     
 # ifdef gravity
     sinThetaDiv += gGlobal * invGridLenGlobal *
-    	(sinThetaSouth * sinThetaSouth / (invDt + CrGlobal / etaDown) -
-    	 sinThetaNorth * sinThetaNorth / (invDt + CrGlobal / etaUp));
+    	(sinThetaSouth * sinThetaSouth * etaDown / (invDt * etaDown + CrGlobal) -
+    	 sinThetaNorth * sinThetaNorth * etaUp / (invDt * etaUp + CrGlobal));
 # else
 # ifdef tiltedGravity
-    sinThetaDiv += 0.57735026919 * gGlobal * invGridLenGlobal *
-    	((cosf(gPhi + halfStep) - sinf(gPhi + halfStep)) * etaRight
-    	 / (invDt * etaRight + CrGlobal) -
-    	 (cosf(gPhi - halfStep) - sinf(gPhi - halfStep)) * etaLeft
-    	 / (invDt * etaLeft + CrGlobal) +
-    	 (cosf(gTheta + halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaSouth)
-    	 / (invDt * etaDown + CrGlobal) * sinThetaSouth * etaDown -
-    	 (cosf(gTheta - halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaNorth)
-    	 / (invDt * etaUp + CrGlobal) * sinThetaNorth * etaUp);
+    // sinThetaDiv += 0.57735026919 * gGlobal * invGridLenGlobal *
+    // 	((cosf(gPhi + halfStep) - sinf(gPhi + halfStep)) * etaRight
+    // 	 / (invDt * etaRight + CrGlobal) -
+    // 	 (cosf(gPhi - halfStep) - sinf(gPhi - halfStep)) * etaLeft
+    // 	 / (invDt * etaLeft + CrGlobal) +
+    // 	 (cosf(gTheta + halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaSouth)
+    // 	 / (invDt * etaDown + CrGlobal) * sinThetaSouth * etaDown -
+    // 	 (cosf(gTheta - halfStep) * (cosf(gPhi) + sinf(gPhi)) + sinThetaNorth)
+    // 	 / (invDt * etaUp + CrGlobal) * sinThetaNorth * etaUp);
 
-    // sinThetaDiv += gGlobal * invGridLenGlobal *
-    //  	 (sinThetaSouth * cosf(gTheta + halfStep) * sinf(gPhi) / (invDt + CrGlobal / etaDown) -
-    //  	  sinThetaNorth * cosf(gTheta - halfStep) * sinf(gPhi) / (invDt + CrGlobal / etaUp) +
-    //  	  cosf(gPhi + halfStep) / (invDt + CrGlobal / etaRight) -
-    //  	  cosf(gPhi - halfStep) / (invDt + CrGlobal / etaLeft));
+    sinThetaDiv += gGlobal * invGridLenGlobal *
+     	 (sinThetaSouth * cosf(gTheta + halfStep) * sinf(gPhi) * etaDown /
+	  (invDt * etaDown + CrGlobal) -
+     	  sinThetaNorth * cosf(gTheta - halfStep) * sinf(gPhi) * etaUp /
+	  (invDt * etaUp + CrGlobal) +
+     	  cosf(gPhi + halfStep) * etaRight / (invDt * etaRight + CrGlobal) -
+     	  cosf(gPhi - halfStep) * etaLeft / (invDt * etaLeft + CrGlobal));
 
     // sinThetaDiv += gGlobal * invGridLenGlobal *
     // 	 (sinThetaSouth * cosf(gTheta + halfStep) * cosf(gPhi) / (invDt + CrGlobal / etaDown) -
@@ -1578,6 +1616,7 @@ void KaminoSolver::AlgebraicMultiGridCG() {
 			    surfConcentration->getThisStepPitchInElements() * sizeof(fReal),
 			    nPhi * sizeof(fReal), nTheta,
 			    cudaMemcpyDeviceToDevice));
+
     AMGX_vector_upload(b, N, 1, rhs);
     AMGX_vector_upload(x, N, 1, d_x);
     AMGX_matrix_upload_all(A, N, nz, 1, 1, row_ptr, col_ind, val, 0);
@@ -1589,10 +1628,18 @@ void KaminoSolver::AlgebraicMultiGridCG() {
 			    d_x, nPhi * sizeof(fReal), nPhi * sizeof(fReal), nTheta,
 			    cudaMemcpyDeviceToDevice));
     int num_iter;
+    AMGX_SOLVE_STATUS status;
+    AMGX_solver_get_status(solver, &status);
     AMGX_solver_get_iterations_number(solver, &num_iter);
     std::cout <<  "Total Iterations:  " << num_iter << std::endl;
-    if (num_iter > 100)
-    	setBroken(true);
+    if (status != AMGX_SOLVE_SUCCESS) {
+	printGPUarraytoMATLAB("row_ptr.txt", row_ptr, N + 1, 1, 1);
+	printGPUarraytoMATLAB("col_ind.txt", col_ind, N, 5, 5);
+	printGPUarraytoMATLAB("val.txt", val, N, 5, 5);
+	printGPUarraytoMATLAB("rhs.txt", rhs, N, 1, 1);
+	printGPUarraytoMATLAB("x.txt", d_x, N, 1, 1);
+	setBroken(true);
+    }	
 }
 
 void KaminoSolver::AMGCLSolve() {
@@ -1675,15 +1722,15 @@ __global__ void applyforcevelthetaKernel
     fReal f3 = 0.0;
 # ifdef gravity
 # ifdef sphere
-    f3 = gGlobal * sinf(gTheta);
+    f3 = gGlobal * sin(gTheta);
 # else
     f3 = gGlobal;
 # endif
 # endif
 # ifdef tiltedGravity
-    f3 = 0.57735026919 * (cosf(gTheta)*(cosf(gPhi) + sinf(gPhi))+sinf(gTheta)) * gGlobal;
-    // f3 = cosf(gTheta) * sinf(gPhi) * gGlobal;
-    // f3 = cosf(gTheta) * cosf(gPhi) * gGlobal;
+    // f3 = 0.57735026919 * (cos(gTheta)*(cos(gPhi) + sin(gPhi))+sin(gTheta)) * gGlobal;
+    f3 = cos(gTheta) * sin(gPhi) * gGlobal;
+    // f3 = cos(gTheta) * cos(gPhi) * gGlobal;
 # endif
 
     // van der Waals
@@ -1708,7 +1755,7 @@ __global__ void applyforcevelphiKernel
     // Coord in phi-theta space
     fReal gPhi = ((fReal)phiId + vPhiPhiOffset) * gridLenGlobal;
     fReal gTheta = ((fReal)thetaId + vPhiThetaOffset) * gridLenGlobal;
-    fReal sinTheta = sinf(gTheta);
+    fReal sinTheta = sin(gTheta);
     fReal cscTheta = 1.0 / sinTheta;
 # else
     fReal sinTheta = 1.0; // no effect
@@ -1740,20 +1787,20 @@ __global__ void applyforcevelphiKernel
 # if defined uair && defined sphere
     // uAir = 20.0 * (1 - smoothstep(0.0, 10.0, currentTimeGlobal)) * (M_hPI - gTheta)
     // 	* expf(-10 * powf(fabsf(gTheta - M_hPI), 2.0)) * radiusGlobal
-    // 	* cosf(gPhi) / UGlobal;
+    // 	* cos(gPhi) / UGlobal;
     uAir = 20.0 * (1.0 - smoothstep(0.0, 10.0, currentTimeGlobal)) / UGlobal * sinTheta
 	* (1.0 - smoothstep(M_PI * 0.0, M_PI * 0.45, fabsf(gTheta - M_hPI))) * radiusGlobal//  +
 	// 20.0 * (1.0 - smoothstep(0.0, 1.0, fabsf(currentTimeGlobal - 9.f))) * (M_hPI - gTheta)
 	// * expf(-10 * powf(fabsf(gTheta - M_hPI), 2.0)) * radiusGlobal
-	// * cosf(gPhi - M_hPI) / UGlobal
+	// * cos(gPhi - M_hPI) / UGlobal
 	;
 # endif
     fReal f2 = CrGlobal * invEta * uAir;
     fReal f3 = 0.0;
 # ifdef tiltedGravity
-    f3 = 0.57735026919 * (cosf(gPhi) - sinf(gPhi)) * gGlobal;
-    // f3 = cosf(gPhi) * gGlobal;
-    // f3 = -sinf(gPhi) * gGlobal;
+    // f3 = 0.57735026919 * (cos(gPhi) - sin(gPhi)) * gGlobal;
+    f3 = cos(gPhi) * gGlobal;
+    // f3 = -sin(gPhi) * gGlobal;
 # endif
 
     // van der Waals
@@ -2106,6 +2153,7 @@ __global__ void applyforceThickness
 # ifdef evaporation
     at(thicknessOutput, thetaId, phiId, pitch) += evaporationRate * timeStepGlobal;
 # endif
+    at(thicknessOutput, thetaId, phiId, pitch) = fmax(thresh, at(thicknessOutput, thetaId, phiId, pitch));
     at(thicknessDelta, thetaId, phiId) = at(thicknessOutput, thetaId, phiId, pitch) - eta;
 }
 
@@ -2351,10 +2399,10 @@ __global__ void correctThickness2(fReal* thicknessOutput, fReal* thicknessInput,
     }
     at(thicknessOutput, thetaId, phiId, pitch)
     	= clamp(at(thicknessOutput, thetaId, phiId, pitch), minVal, maxVal);
-    at(thicknessOutput, thetaId, phiId, pitch) = fmaxf(0.0, at(thicknessOutput, thetaId, phiId, pitch));
+    at(thicknessOutput, thetaId, phiId, pitch) = fmax(eps, at(thicknessOutput, thetaId, phiId, pitch));
 
     // minVal = at(gammaInput, thetaId, phiId, pitch);
-    // maxVal = 0.0;
+    // maxVal = minVal;
     // for (int t : range) {
     // 	for (int p : range) {
     // 	    int2 sampleId = make_int2(thetaId + t, phiId + p);
@@ -2529,11 +2577,12 @@ __global__ void vanDerWaals(fReal* W, fReal* eta, size_t pitch) {
     int thetaId = blockIdx.x / splitVal;
     if (phiId >= nPhiGlobal) return;
 
-    fReal invEta = 1.0 / at(eta, thetaId, phiId, pitch);
-    if (invEta <= 0.0) {
-	at(W, thetaId, phiId, pitch) = 0.0;
-    } else {
+    fReal Eta = at(eta, thetaId, phiId, pitch);
+    fReal invEta = 1.0 / Eta;
+    if (Eta > thresh) {
 	at(W, thetaId, phiId, pitch) = W1 * powf(invEta, 4.0) - W2 * powf(invEta, 2.0);
+    } else {
+	at(W, thetaId, phiId, pitch) = 0.0;
     }
 }
 
@@ -2662,7 +2711,16 @@ void KaminoSolver::bodyforce() {
 # ifdef PERFORMANCE_BENCHMARK
     this->CGTime += CGtimer.stopTimer() * 0.001f;
 # endif
-    
+
+    // this function clamps gamma!!
+    // must be called directly after CG solver!!
+    determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+    divergenceKernel_fromGamma<<<gridLayout, blockLayout>>>
+    	(div, surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
+    	 surfConcentration->getNextStepPitchInElements());
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
+
     determineLayout(gridLayout, blockLayout, velTheta->getNTheta(), velTheta->getNPhi());
     applyforcevelthetaKernel<<<gridLayout, blockLayout>>>
     	(velTheta->getGPUNextStep(), velTheta->getGPUThisStep(), tmp_t, velPhi->getGPUThisStep(),
@@ -2686,12 +2744,6 @@ void KaminoSolver::bodyforce() {
     // checkCudaErrors(cudaGetLastError());
     //    checkCudaErrors(cudaDeviceSynchronize());
 
-    determineLayout(gridLayout, blockLayout, nTheta, nPhi);
-    divergenceKernel_fromGamma<<<gridLayout, blockLayout>>>
-    	(div, surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
-    	 surfConcentration->getNextStepPitchInElements());
-    checkCudaErrors(cudaGetLastError());
-    checkCudaErrors(cudaDeviceSynchronize());
 
     // write thickness difference to tmp_t, gamma difference to tmp_p
     determineLayout(gridLayout, blockLayout, thickness->getNTheta(), thickness->getNPhi());
@@ -2808,7 +2860,7 @@ Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
     gridLen(M_PI / nTheta), invGridLen(nTheta / M_PI), 
     dt(dt*U/radius), DT(DT), frames(frames), outputDir(outputDir),
     thicknessImage(thicknessImage), particleDensity(particleDensity), device(device),
-    AMGconfig(AMGconfig), blendCoeff(blendCoeff)
+    AMGconfig(AMGconfig), blendCoeff(blendCoeff), gammaMax(sigma_a / sigma_r / Gamma_m)
 {
     boost::filesystem::create_directories(outputDir);
     if (outputDir.back() != '/')
@@ -2817,12 +2869,15 @@ Kamino::Kamino(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
 				 boost::filesystem::copy_option::overwrite_if_exists);
     boost::filesystem::copy_file("../include/KaminoHeader.cuh", this->outputDir + "KaminoHeader.cuh",
 				 boost::filesystem::copy_option::overwrite_if_exists);
+    boost::filesystem::copy_file("../kernel/KaminoCore.cu", this->outputDir + "KaminoCore.cu",
+				 boost::filesystem::copy_option::overwrite_if_exists);
 
     std::cout << "Re^-1 " << re << std::endl;
     std::cout << "Cr " << Cr << std::endl;
     std::cout << "M " << M << std::endl;
     std::cout << "S " << S << std::endl;
     std::cout << "epsilon " << epsilon << std::endl;
+    std::cout << "gammaMax " << gammaMax << std::endl;
     std::cout << "AMG config file: " << AMGconfig << std::endl;
 }
 Kamino::~Kamino()
@@ -2847,11 +2902,14 @@ void Kamino::run()
     checkCudaErrors(cudaMemcpyToSymbol(CrGlobal, &(this->Cr), sizeof(fReal)));
     checkCudaErrors(cudaMemcpyToSymbol(UGlobal, &(this->U), sizeof(fReal)));
     checkCudaErrors(cudaMemcpyToSymbol(blend_coeff, &(this->blendCoeff), sizeof(fReal)));
+    checkCudaErrors(cudaMemcpyToSymbol(gammaMaxGlobal, &(this->gammaMax), sizeof(fReal)));
 # ifdef evaporation
     fReal eva = evaporation * radius / (H * U);
-    checkCudaErrors(cudaMemcpyToSymbol(evaporationRate, &eva, sizeof(fReal)));
+# else
+    fReal eva = 0.;
 # endif
-    fReal epsilon_ = 1.0;
+    checkCudaErrors(cudaMemcpyToSymbol(evaporationRate, &eva, sizeof(fReal)));
+    fReal epsilon_ = .0; // deactivate vdw?
     fReal W2_ = radius / (U * U) * pow(rm / H, 2) * epsilon_;
     fReal W1_ = 0.5 * W2_ * pow(rm / H, 2);
     checkCudaErrors(cudaMemcpyToSymbol(W1, &W1_, sizeof(fReal)));
@@ -2891,7 +2949,8 @@ void Kamino::run()
 	    solver.stepForward();
 	    T += dt_;
 	}
-	if (T < i*DT && !solver.isBroken()) {
+	if ((T + eps) < i*DT && !solver.isBroken()) {
+	    // TODO: is small interval imprecise?
 	    fReal tmp_dt = (i * DT - T) * this->U / this->radius;
 	    checkCudaErrors(cudaMemcpyToSymbol(timeStepGlobal, &tmp_dt, sizeof(fReal)));
 	    solver.stepForward(i * DT - T);

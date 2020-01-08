@@ -52,15 +52,13 @@ void KaminoSolver::initThicknessfromPic(std::string path)
     if (path == "") {
 	std::cout << "No thickness image provided, initialize with eta = 0.5" << std::endl;
     } else {
-	cv::Mat image_In, image_Flipped;
+	cv::Mat image_In, image_Resized;
 	image_In = cv::imread(path, cv::IMREAD_UNCHANGED);
 	if (!image_In.data) {
 	    std::cout << "No thickness image provided, initialize with eta = 0.5" << std::endl;
 	} else {
-	    cv::Mat image_Resized;
-	    cv::flip(image_In, image_Flipped, 1);
 	    cv::Size size(nPhi, nTheta);
-	    cv::resize(image_Flipped, image_Resized, size);
+	    cv::resize(image_In, image_Resized, size);
 
 	    for (size_t i = 0; i < nPhi; ++i) {
 	    	for (size_t j = 0; j < nTheta; ++j) {
@@ -69,12 +67,8 @@ void KaminoSolver::initThicknessfromPic(std::string path)
 		    this->thickness->setCPUValueAt(i, j, C);
 	    	}
 	    }
-
 	    this->thickness->copyToGPU();
-    
-	    this->rows = image_Flipped.rows;
-	    this->cols = image_Flipped.cols;
-   	}
+       	}
     }
 
     CHECK_CUDA(cudaMemcpy(this->thickness->getGPUInit(), this->thickness->getGPUThisStep(),

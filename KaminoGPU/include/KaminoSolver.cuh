@@ -30,8 +30,6 @@ private:
     fReal2* weightFull;
     fReal* thicknessFull;
     fReal* thicknessFullCPU;
-    int cols;
-    int rows;
 
     /* Grid dimensions */
     size_t nPhi;
