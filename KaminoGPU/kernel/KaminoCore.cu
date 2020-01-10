@@ -1027,8 +1027,8 @@ __global__ void advectionAllCentered
 
 
 __global__ void advectionCenteredBimocq
-(fReal* thicknessOutput, fReal* thicknessInput, fReal* thicknessInit, fReal* thicknessDelta,
- fReal* thicknessInitLast, fReal* thicknessDeltaLast, fReal* velTheta, fReal* velPhi,
+(fReal* attribOutput, fReal* attribInput, fReal* attribInit, fReal* attribDelta,
+ fReal* attribInitLast, fReal* attribDeltaLast, fReal* velTheta, fReal* velPhi,
  fReal* bwd_t, fReal* bwd_p, fReal* bwd_tprev, fReal* bwd_pprev, size_t pitch) {
 
     // Index
@@ -1041,10 +1041,10 @@ __global__ void advectionCenteredBimocq
     // Coord in scalar space
     fReal2 gId = make_fReal2((fReal)thetaId, (fReal)phiId) + centeredOffset;
     
-    fReal thickness = 0.0;
-    if (at(thicknessInput, thetaId, phiId, pitch) == thresh) {
-	at(thicknessOutput, thetaId, phiId, pitch) = thresh;
-	return;
+    fReal attrib = 0.0;
+    if (at(attribInput, thetaId, phiId, pitch) == thresh) {
+    	at(attribOutput, thetaId, phiId, pitch) = thresh;
+    	return;
     }
 
 # ifdef MULTISAMPLE
@@ -1065,13 +1065,13 @@ __global__ void advectionCenteredBimocq
 	fReal2 posId = gId + dir[i];
 	fReal2 initPosId = sampleMapping(bwd_t, bwd_p, posId);
 	fReal2 lastPosId = sampleMapping(bwd_tprev, bwd_pprev, initPosId);
-	thickness += (1.0 - blend_coeff) * w[i] * (sampleCentered(thicknessInitLast, lastPosId, pitch) +
-						   sampleCentered(thicknessDelta, initPosId, pitch) +
-						   sampleCentered(thicknessDeltaLast, lastPosId, pitch)); 
-	thickness += blend_coeff * w[i] * (sampleCentered(thicknessInit, initPosId, pitch) +
-					   sampleCentered(thicknessDelta, initPosId, pitch));
+	attrib += (1.0 - blend_coeff) * w[i] * (sampleCentered(attribInitLast, lastPosId, pitch) +
+						   sampleCentered(attribDelta, initPosId, pitch) +
+						   sampleCentered(attribDeltaLast, lastPosId, pitch));
+	attrib += blend_coeff * w[i] * (sampleCentered(attribInit, initPosId, pitch) +
+					   sampleCentered(attribDelta, initPosId, pitch));
     }
-    at(thicknessOutput, thetaId, phiId, pitch) = fmax(thresh, thickness);
+    at(attribOutput, thetaId, phiId, pitch) = fmax(thresh, attrib);
 }
 
 
@@ -1316,7 +1316,6 @@ void KaminoSolver::advection()
 	(velPhi->getGPUNextStep(), velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), velPhi->getNextStepPitchInElements());
     checkCudaErrors(cudaGetLastError());
 
-
     // Advect concentration
     determineLayout(gridLayout, blockLayout, surfConcentration->getNTheta(), surfConcentration->getNPhi());
 # ifdef BIMOCQ
@@ -1327,9 +1326,11 @@ void KaminoSolver::advection()
 	 backward_t, backward_p, backward_tprev, backward_pprev, pitch);
     checkCudaErrors(cudaGetLastError());
 
-    advectionCentered<<<gridLayout, blockLayout>>>
-	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
-	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), pitch);
+    advectionCenteredBimocq<<<gridLayout, blockLayout>>>
+    	(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(), surfConcentration->getGPUInit(),
+    	 surfConcentration->getGPUDelta(), surfConcentration->getGPUInitLast(),
+    	 surfConcentration->getGPUDeltaLast(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
+    	 backward_t, backward_p, backward_tprev, backward_pprev, pitch);
 # else
     advectionAllCentered<<<gridLayout, blockLayout>>>
 	(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
@@ -1706,16 +1707,23 @@ __global__ void applyforcevelthetaKernel
     // value at vTheta grid
     fReal invEta = 2. / (EtaNorth + EtaSouth);
 
+    if (isinf(invEta)) {
+	at(velThetaOutput, thetaId, phiId, pitch) = CUDART_NAN;
+	at(velThetaDelta, thetaId, phiId) = CUDART_NAN;
+	return;
+    }
+
     // pGpy = \frac{\partial\Gamma}{\partial\theta};
     fReal pGpy = invGridLenGlobal * (GammaSouth - GammaNorth);
 
     // elasticity
     fReal f1 = -MGlobal * invEta * pGpy;
+
     // air friction
     fReal vAir = at(vair, thetaId, phiId);
 # if defined vair && defined sphere
     vAir = (gTheta < M_hPI) * 2 * (1 - smoothstep(0.0, 5.f, fabsf(currentTimeGlobal - 5.f)))
-	* sinf(gTheta) * cosf(2 * gPhi) * radiusGlobal / UGlobal; // TODO: delete
+	* sin(gTheta) * cos(2 * gPhi) * radiusGlobal / UGlobal; // TODO: delete
 # endif
     fReal f2 = CrGlobal * invEta * vAir;
 
@@ -2231,7 +2239,7 @@ __global__ void substractPitched(fReal* a, fReal* b, fReal* c, size_t pitch) {
 }
 
 
-__global__ void accumulateChangesThickness(fReal* thicknessDelta, fReal* thicknessDeltaTemp,
+__global__ void accumulateChangesCentered(fReal* attribDelta, fReal* attribDeltaTemp,
 					   fReal* fwd_t, fReal* fwd_p,
 					   size_t pitch) {
     // Index
@@ -2261,8 +2269,8 @@ __global__ void accumulateChangesThickness(fReal* thicknessDelta, fReal* thickne
     for (int i = 0; i < samples; i++) {
 	fReal2 posId = gId + dir[i];
 	fReal2 initPosId = sampleMapping(fwd_t, fwd_p, posId);
-	at(thicknessDelta, thetaId, phiId, pitch)
-	    += w[i] * sampleCentered(thicknessDeltaTemp, initPosId, nPhiGlobal);
+	at(attribDelta, thetaId, phiId, pitch)
+	    += w[i] * sampleCentered(attribDeltaTemp, initPosId, nPhiGlobal);
     }
 }
 
@@ -2327,9 +2335,12 @@ __global__ void accumulateChangesVPhi(fReal* vPhiDelta, fReal* vPhiDeltaTemp,
 
 
 
-__global__ void correctThickness1(fReal* thicknessCurr, fReal* thicknessError, fReal* thicknessDelta,
-				  fReal* thicknessInit, fReal* fwd_t, fReal* fwd_p,
-				  size_t pitch) {
+__global__ void correctCentered1(fReal* thicknessCurr, fReal* thicknessError,
+				 fReal* thicknessDelta, fReal* thicknessInit,
+				 fReal* gammaCurr, fReal* gammaError,
+				 fReal* gammaDelta, fReal* gammaInit,
+				 fReal* fwd_t, fReal* fwd_p,
+				 size_t pitch) {
     fReal w[5] = {0.125, 0.125, 0.125, 0.125, 0.5};
     fReal2 dir[5] = {make_fReal2(-0.25,-0.25),
 		     make_fReal2(0.25, -0.25),
@@ -2345,7 +2356,7 @@ __global__ void correctThickness1(fReal* thicknessCurr, fReal* thicknessError, f
     if (phiId >= nPhiGlobal) return;
 
     fReal thickness = 0.0;
-    // fReal gamma = 0.0;
+    fReal gamma = 0.0;
 
     // Coord in scalar space
     fReal2 gId = make_fReal2((fReal)thetaId, (fReal)phiId) + centeredOffset;
@@ -2353,17 +2364,19 @@ __global__ void correctThickness1(fReal* thicknessCurr, fReal* thicknessError, f
 	fReal2 posId = gId + dir[i];
 	fReal2 initPosId = sampleMapping(fwd_t, fwd_p, posId);
 	thickness += w[i] * sampleCentered(thicknessCurr, initPosId, pitch);
-	// gamma += w[i] * sampleCentered(gammaCurr, initPosId, pitch);
+        gamma += w[i] * sampleCentered(gammaCurr, initPosId, pitch);
     }
     at(thicknessError, thetaId, phiId) = (thickness - at(thicknessDelta, thetaId, phiId, pitch)
 					  - at(thicknessInit, thetaId, phiId, pitch)) * 0.5;
-    // at(gammaError, thetaId, phiId) = (gamma - at(gammaDelta, thetaId, phiId, pitch)
-    // 					  - at(gammaInit, thetaId, phiId, pitch)) * 0.5;
+    at(gammaError, thetaId, phiId) = (gamma - at(gammaDelta, thetaId, phiId, pitch)
+				      - at(gammaInit, thetaId, phiId, pitch)) * 0.5;
 }
 
 
-__global__ void correctThickness2(fReal* thicknessOutput, fReal* thicknessInput,
-				 fReal* thicknessError, fReal* bwd_t, fReal* bwd_p, size_t pitch) {
+__global__ void correctCentered2(fReal* thicknessOutput, fReal* thicknessInput,
+				 fReal* thicknessError, fReal* gammaOutput,
+				 fReal* gammaInput, fReal* gammaError,
+				 fReal* bwd_t, fReal* bwd_p, size_t pitch) {
     fReal w[5] = {0.125, 0.125, 0.125, 0.125, 0.5};
     fReal2 dir[5] = {make_fReal2(-0.25,-0.25),
 		     make_fReal2(0.25, -0.25),
@@ -2386,8 +2399,8 @@ __global__ void correctThickness2(fReal* thicknessOutput, fReal* thicknessInput,
 	fReal2 sampleId = sampleMapping(bwd_t, bwd_p, posId);
 	at(thicknessOutput, thetaId, phiId, pitch)
 	    -= w[i] * sampleCentered(thicknessError, sampleId, nPhiGlobal);
-	// at(gammaOutput, thetaId, phiId, pitch)
-	//     -= w[i] * sampleCentered(gammaError, sampleId, nPhiGlobal);
+	 at(gammaOutput, thetaId, phiId, pitch)
+	 -= w[i] * sampleCentered(gammaError, sampleId, nPhiGlobal);
     }
 
     // clamp local extrema
@@ -2406,21 +2419,22 @@ __global__ void correctThickness2(fReal* thicknessOutput, fReal* thicknessInput,
     }
     at(thicknessOutput, thetaId, phiId, pitch)
     	= clamp(at(thicknessOutput, thetaId, phiId, pitch), minVal, maxVal);
-    at(thicknessOutput, thetaId, phiId, pitch) = fmax(eps, at(thicknessOutput, thetaId, phiId, pitch));
+    at(thicknessOutput, thetaId, phiId, pitch) = fmax(thresh, at(thicknessOutput, thetaId, phiId, pitch));
 
-    // minVal = at(gammaInput, thetaId, phiId, pitch);
-    // maxVal = minVal;
-    // for (int t : range) {
-    // 	for (int p : range) {
-    // 	    int2 sampleId = make_int2(thetaId + t, phiId + p);
-    // 	    validateId(sampleId);
-    // 	    fReal currentVal = at(gammaInput, sampleId, pitch);
-    // 	    minVal = fminf(minVal, currentVal);
-    // 	    maxVal = fmaxf(maxVal, currentVal);
-    // 	}
-    // }
-    // at(gammaOutput, thetaId, phiId, pitch)
-    // 	= clamp(at(gammaOutnput, thetaId, phiId, pitch), minVal, maxVal);
+    minVal = at(gammaInput, thetaId, phiId, pitch);
+    maxVal = minVal;
+    for (int t : range) {
+    	for (int p : range) {
+    	    int2 sampleId = make_int2(thetaId + t, phiId + p);
+    	    validateId(sampleId);
+    	    fReal currentVal = at(gammaInput, sampleId, pitch);
+    	    minVal = fminf(minVal, currentVal);
+    	    maxVal = fmaxf(maxVal, currentVal);
+    	}
+    }
+    at(gammaOutput, thetaId, phiId, pitch)
+    	= clamp(at(gammaOutput, thetaId, phiId, pitch), minVal, maxVal);
+    at(gammaOutput, thetaId, phiId, pitch) = fmax(thresh, at(gammaOutput, thetaId, phiId, pitch));
 }
 
 __global__ void correctVTheta1(fReal* vThetaCurr, fReal* vThetaError, fReal* vThetaDelta,
@@ -2760,8 +2774,19 @@ void KaminoSolver::bodyforce() {
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
-    accumulateChangesThickness<<<gridLayout, blockLayout>>>
+    accumulateChangesCentered<<<gridLayout, blockLayout>>>
 	(thickness->getGPUDelta(), tmp_t, forward_t, forward_p, pitch);
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
+
+    substractPitched<<<gridLayout, blockLayout>>>
+    	(tmp_p, surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
+    	 pitch);
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
+
+    accumulateChangesCentered<<<gridLayout, blockLayout>>>
+    	(surfConcentration->getGPUDelta(), tmp_p, forward_t, forward_p, pitch);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
@@ -2781,15 +2806,20 @@ void KaminoSolver::reInitializeMapping() {
 	CHECK_CUDA(cudaMemcpy(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
 			      thickness->getNTheta() * pitch * sizeof(fReal),
 			      cudaMemcpyDeviceToDevice));
+	CHECK_CUDA(cudaMemcpy(surfConcentration->getGPUNextStep(), surfConcentration->getGPUThisStep(),
+			      surfConcentration->getNTheta() * pitch * sizeof(fReal),
+			      cudaMemcpyDeviceToDevice));
 
-	correctThickness1<<<gridLayout, blockLayout>>>
+	correctCentered1<<<gridLayout, blockLayout>>>
 	    (thickness->getGPUThisStep(), tmp_t, thickness->getGPUDelta(), thickness->getGPUInit(),
+	     surfConcentration->getGPUThisStep(), tmp_p, surfConcentration->getGPUDelta(), surfConcentration->getGPUInit(),
 	     forward_t, forward_p, pitch);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
 
-	correctThickness2<<<gridLayout, blockLayout>>>
+	correctCentered2<<<gridLayout, blockLayout>>>
 	    (thickness->getGPUThisStep(), thickness->getGPUNextStep(), tmp_t,
+	     surfConcentration->getGPUThisStep(), surfConcentration->getGPUNextStep(), tmp_p,
 	     backward_t, backward_p, pitch);
 	checkCudaErrors(cudaGetLastError());
 	checkCudaErrors(cudaDeviceSynchronize());
@@ -2831,6 +2861,8 @@ void KaminoSolver::reInitializeMapping() {
 
     std::swap(this->thickness->getGPUInitLast(), this->thickness->getGPUInit());
     std::swap(this->thickness->getGPUDeltaLast(), this->thickness->getGPUDelta());
+    std::swap(this->surfConcentration->getGPUInitLast(), this->surfConcentration->getGPUInit());
+    std::swap(this->surfConcentration->getGPUDeltaLast(), this->surfConcentration->getGPUDelta());
     std::swap(backward_tprev, backward_t);
     std::swap(backward_pprev, backward_p);
 
@@ -2840,6 +2872,14 @@ void KaminoSolver::reInitializeMapping() {
 
     CHECK_CUDA(cudaMemset(this->thickness->getGPUDelta(), 0,
 			  pitch * sizeof(fReal) * this->thickness->getNTheta()));
+
+    CHECK_CUDA(cudaMemcpy(this->surfConcentration->getGPUInit(), this->surfConcentration->getGPUThisStep(),
+    			  this->surfConcentration->getThisStepPitchInElements() * this->surfConcentration->getNTheta() *
+    			  sizeof(fReal), cudaMemcpyDeviceToDevice));
+
+    CHECK_CUDA(cudaMemset(this->surfConcentration->getGPUDelta(), 0,
+    			  pitch * sizeof(fReal) * this->surfConcentration->getNTheta()));
+
     // CHECK_CUDA(cudaMemset(this->velTheta->getGPUDelta(), 0,
     // 			  pitch * sizeof(fReal) * this->thickness->getNTheta()));
     // CHECK_CUDA(cudaMemset(this->velPhi->getGPUDelta(), 0,
