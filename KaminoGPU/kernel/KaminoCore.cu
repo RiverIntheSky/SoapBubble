@@ -108,8 +108,6 @@ inline __device__ fReal dist(fReal2 Id1, fReal2 Id2) {
 
 /**
  * return the maximal absolute value in array vel
- * usage: maxValKernel<<<gridSize, blockSize>>>(maxVal, vel);
- *        maxValKernel<<<1, blockSize>>>(maxVal, maxVal);
  */
 __global__ void maxValKernel(fReal* maxVal, fReal* array) {
     __shared__ float maxValTile[MAX_BLOCK_SIZE];
@@ -1153,13 +1151,16 @@ __global__ void advectionCenteredBimocq
  * return the maximal absolute value in array with nTheta rows and nPhi cols
  */
 fReal KaminoSolver::maxAbs(fReal* array, size_t nTheta, size_t nPhi) {
-    fReal *max, result;
-    CHECK_CUDA(cudaMalloc(&max, MAX_BLOCK_SIZE * sizeof(fReal)));
-    CHECK_CUDA(cudaMemset(max, 0, MAX_BLOCK_SIZE * sizeof(fReal)));
-
     dim3 gridLayout;
     dim3 blockLayout;
     determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+    int layout = (gridLayout.x + blockLayout.x - 1) / blockLayout.x;
+    fReal *max;
+    std::vector<fReal> result(layout);
+
+    CHECK_CUDA(cudaMalloc(&max, MAX_BLOCK_SIZE * sizeof(fReal)));
+    CHECK_CUDA(cudaMemset(max, 0, MAX_BLOCK_SIZE * sizeof(fReal)));
+
     if (gridLayout.x > MAX_BLOCK_SIZE) {
 	gridLayout.x = MAX_BLOCK_SIZE;
 	blockLayout.x = N / MAX_BLOCK_SIZE;
@@ -1167,12 +1168,12 @@ fReal KaminoSolver::maxAbs(fReal* array, size_t nTheta, size_t nPhi) {
     }
     maxValKernel<<<gridLayout, blockLayout>>>(max, array);
     CHECK_CUDA(cudaDeviceSynchronize());
-    maxValKernel<<<1, blockLayout>>>(max, max);
-    CHECK_CUDA(cudaMemcpy(&result, max, sizeof(fReal),
+    maxValKernel<<<layout, blockLayout>>>(max, max);
+    CHECK_CUDA(cudaMemcpy(&result[0], max, sizeof(fReal) * layout,
      			  cudaMemcpyDeviceToHost));
     CHECK_CUDA(cudaGetLastError());
     CHECK_CUDA(cudaFree(max));
-    return result;
+    return *std::max_element(result.begin(), result.end());
 }
 
 
@@ -1776,6 +1777,12 @@ __global__ void applyforcevelphiKernel
         
     // value at uPhi grid
     fReal invEta = 2. / (EtaWest + EtaEast);
+    if (isinf(invEta)) {
+	at(velPhiOutput, thetaId, phiId, pitch) = CUDART_NAN;
+	at(velPhiDelta, thetaId, phiId) = CUDART_NAN;
+	return;
+    }
+
     
     // pGpx = frac{1}{\sin\theta}\frac{\partial\Gamma}{\partial\phi};
     fReal pGpx = invGridLenGlobal * (GammaEast - GammaWest) * cscTheta;
@@ -2982,11 +2989,7 @@ void Kamino::run()
 # ifdef WRITE_CONCENTRATION_DATA
 	solver.write_concentration_image(outputDir, i);
 # endif
-
-
-
-	
-
+	std::cout << "--------------------------------------------------------" << std::endl;
     }
 
 # ifdef PERFORMANCE_BENCHMARK
