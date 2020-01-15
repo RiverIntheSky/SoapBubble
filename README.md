@@ -1,1 +1,1 @@
-Usage: ./kamino configKamino.txt
+Usage: ./soapBubble ../config.txt
