@@ -95,7 +95,7 @@ const fReal nua = 1.562e-5;		// air kinematic viscosity. m^2 s^-1
 # undef gravity
 # endif
 
-# define evaporation -0.000000008
+# define evaporation -0.00000008
 # define air
 // # define WRITE_TXT
 # define BIMOCQ

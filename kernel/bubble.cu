@@ -1301,11 +1301,14 @@ void Solver::advection()
 	 backward_t, backward_p, backward_tprev, backward_pprev, pitch);
     checkCudaErrors(cudaGetLastError());
 
-    advectionCenteredBimocq<<<gridLayout, blockLayout>>>
-    	(concentration->getGPUNextStep(), concentration->getGPUThisStep(), concentration->getGPUInit(),
-    	 concentration->getGPUDelta(), concentration->getGPUInitLast(),
-    	 concentration->getGPUDeltaLast(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
-    	 backward_t, backward_p, backward_tprev, backward_pprev, pitch);
+    // advectionCenteredBimocq<<<gridLayout, blockLayout>>>
+    // 	(concentration->getGPUNextStep(), concentration->getGPUThisStep(), concentration->getGPUInit(),
+    // 	 concentration->getGPUDelta(), concentration->getGPUInitLast(),
+    // 	 concentration->getGPUDeltaLast(), velTheta->getGPUThisStep(), velPhi->getGPUThisStep(),
+    // 	 backward_t, backward_p, backward_tprev, backward_pprev, pitch);
+    advectionCentered<<<gridLayout, blockLayout>>>
+	(concentration->getGPUNextStep(), concentration->getGPUThisStep(),
+	 velPhi->getGPUThisStep(), velTheta->getGPUThisStep(), pitch);
 # else
     advectionAllCentered<<<gridLayout, blockLayout>>>
 	(thickness->getGPUNextStep(), thickness->getGPUThisStep(),
@@ -1590,9 +1593,9 @@ __global__ void concentrationLinearSystemKernel
 
 void Solver::AlgebraicMultiGridCG() {
     checkCudaErrors(cudaMemcpy2D(d_x, nPhi * sizeof(fReal), concentration->getGPUThisStep(),
-			    concentration->getThisStepPitchInElements() * sizeof(fReal),
-			    nPhi * sizeof(fReal), nTheta,
-			    cudaMemcpyDeviceToDevice));
+				 pitch * sizeof(fReal),
+				 nPhi * sizeof(fReal), nTheta,
+				 cudaMemcpyDeviceToDevice));
 
     AMGX_vector_upload(b, N, 1, rhs);
     AMGX_vector_upload(x, N, 1, d_x);
@@ -1601,9 +1604,9 @@ void Solver::AlgebraicMultiGridCG() {
     AMGX_solver_solve(solver, b, x);
     AMGX_vector_download(x, d_x);
     checkCudaErrors(cudaMemcpy2D(concentration->getGPUNextStep(),
-			    concentration->getNextStepPitchInElements() * sizeof(fReal),
-			    d_x, nPhi * sizeof(fReal), nPhi * sizeof(fReal), nTheta,
-			    cudaMemcpyDeviceToDevice));
+				 pitch * sizeof(fReal),
+				 d_x, nPhi * sizeof(fReal), nPhi * sizeof(fReal), nTheta,
+				 cudaMemcpyDeviceToDevice));
     int num_iter;
     AMGX_SOLVE_STATUS status;
     AMGX_solver_get_status(solver, &status);
@@ -2563,12 +2566,6 @@ __global__ void airFlowU(fReal* uair) {
     double sinPhi = sin(gPhi);
     double cosPhi = cos(gPhi);
 
-    //    double alpha = -M_hPI / 3.;
-    // double alpha = sin(currentTimeGlobal * M_PI) * M_PI;
-    // //  alpha = 0.;
-    // double angle = M_hPI * 3. / 4.;
-    // double3 wind = normalize(make_double3(0., -1., sin(alpha)));
-    // double3 position = make_double3(sin(angle), 0., cos(angle));
     double3 wind = normalize(make_double3(0., -1., 0.));
     double3 position = make_double3(1., 0, 0);
     double3 normal = normalize(cross(position, wind));
@@ -2586,8 +2583,6 @@ __global__ void airFlowU(fReal* uair) {
     // Unit vector in theta and phi direction
     double3 ePhi = make_double3(-sinPhi, cosPhi, 0.);
     double3 Air = 3. * sin(beta) / UGlobal * radiusGlobal * projectedWind;
-    // double3 Air = 8. * (1 - smoothstep(0.15, 0.35, fabs(beta - M_hPI))) / UGlobal *
-    // 	radiusGlobal * projectedWind * (sinGamma > 0.5) * sinGamma;
     at(uair, thetaId, phiId) = fReal(dot(Air, ePhi)) * (1 - smoothstep(0.9, 1.1, fabs(currentTimeGlobal - 2.)));
     if (isnan(at(uair, thetaId, phiId))) // normal == currentPosition
 	at(uair, thetaId, phiId) = 0.0;
@@ -2610,12 +2605,6 @@ __global__ void airFlowV(fReal* vair) {
     double sinPhi = sin(gPhi);
     double cosPhi = cos(gPhi);
 
-    //    double alpha = -M_hPI / 3.;
-    // double alpha = sin(currentTimeGlobal * M_PI) * M_PI;
-    // //        alpha = 0.;
-    // double angle = M_hPI * 3. / 4.;
-    // double3 wind = normalize(make_double3(0., -1., sin(alpha)));
-    // double3 position = make_double3(sin(angle), 0., cos(angle));
     double3 wind = normalize(make_double3(0., -1., 0.));
     double3 position = make_double3(1., 0, 0);
 
@@ -2632,8 +2621,6 @@ __global__ void airFlowV(fReal* vair) {
 
     // Unit vector in theta and phi direction
     double3 eTheta = make_double3(cosTheta * cosPhi, cosTheta * sinPhi, -sinTheta);
-    // double3 Air = 8. * (1 - smoothstep(0.15, 0.35, fabs(beta - M_hPI))) / UGlobal *
-    // 	radiusGlobal * projectedWind * (sinGamma > 0.5) * sinGamma;
     double3 Air = 3. * sin(beta) / UGlobal * radiusGlobal * projectedWind;
     at(vair, thetaId, phiId) = fReal(dot(Air, eTheta)) * (1 - smoothstep(0.9, 1.1, fabs(currentTimeGlobal - 2.)));
     if (isnan(at(vair, thetaId, phiId)))
@@ -2955,17 +2942,6 @@ void Bubble::run()
 	    break;
 	}
 	T = i*DT;
-# ifdef BIMOCQ
-	fReal distortion = solver.estimateDistortion();
-	//	    fReal q = solver.cfldt * distortion / dt;
-	std::cout << "max distortion " << distortion << std::endl;
-// 	    std::cout << "q " << q << std::endl;
-	if (distortion > nTheta / 256.f) {
-		//	if (q > .5) {
-	    solver.reInitializeMapping();
-	    std::cout << "mapping reinitialized" << std::endl;
-	}
-# endif
 	std::cout << "Frame " << i << " is ready" << std::endl;
 
 # ifdef WRITE_THICKNESS_DATA

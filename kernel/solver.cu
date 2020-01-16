@@ -269,6 +269,15 @@ void Solver::stepForward() {
 # ifdef PERFORMANCE_BENCHMARK
     this->bodyforceTime += timer.stopTimer() * 0.001f;
 # endif
+    # ifdef BIMOCQ
+    fReal distortion = estimateDistortion();
+    std::cout << "max distortion " << distortion << std::endl;
+    if (distortion > 2.f) {
+	reInitializeMapping();
+	std::cout << "mapping reinitialized" << std::endl;
+    }
+# endif
+
     this->timeElapsed += this->timeStep;
     count++;
 }

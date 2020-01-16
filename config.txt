@@ -8,8 +8,8 @@ Ds 0.0
 rm 0.000000005
 numberOfGridsInTheta 256
 timePerStep 0.005
-timePerFrame 0.02
-frameNumbers 250
+timePerFrame 0.005
+frameNumbers 1000
 outputDir ../out/test
 thicknessInit ../init/lowFrequency.exr
 AMGconfig ../init/PCGF_F.json

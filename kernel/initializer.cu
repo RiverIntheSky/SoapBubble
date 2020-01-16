@@ -64,6 +64,7 @@ void Solver::initThicknessfromPic(std::string path)
 	    	for (size_t j = 0; j < nTheta; ++j) {
 	    	    cv::Point3_<float>* p = image_Resized.ptr<cv::Point3_<float>>(j, i);
 	    	    fReal C = (fReal)p->x; // Gray Scale
+		    C = (C - 0.5) * 0.1 + 0.5;
 		    this->thickness->setCPUValueAt(i, j, C);
 	    	}
 	    }
