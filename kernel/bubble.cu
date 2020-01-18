@@ -1,7 +1,6 @@
 # include "solver.cuh"
 # include "bubble.cuh"
 # include "timer.cuh"
-# include <boost/filesystem.hpp>
 # include "utils.h"
 
 __constant__ fReal invGridLenGlobal;
@@ -2849,10 +2848,11 @@ Bubble::Bubble(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
 	this->outputDir.append("/");
     boost::filesystem::copy_file("../config.txt", this->outputDir + "config.txt",
 				 boost::filesystem::copy_option::overwrite_if_exists);
-    boost::filesystem::copy_file("../include/header.cuh", this->outputDir + "header.cuh",
-				 boost::filesystem::copy_option::overwrite_if_exists);
-    boost::filesystem::copy_file("../kernel/bubble.cu", this->outputDir + "bubble.cu",
-				 boost::filesystem::copy_option::overwrite_if_exists);
+
+    std::string includeDir = this->outputDir + "include";
+    std::string kernelDir = this->outputDir + "kernel";
+    copyDir("../include", includeDir);
+    copyDir("../kernel", kernelDir);
 
     std::cout << "Re^-1 " << re << std::endl;
     std::cout << "Cr " << Cr << std::endl;

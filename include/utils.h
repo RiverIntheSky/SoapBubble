@@ -3,6 +3,7 @@
 # include "cuda_runtime_api.h"
 # include <vector>
 # include <algorithm>
+# include <boost/filesystem.hpp>
 
 __inline__ __host__ __device__ double2 operator*(double2 a, double b) {
     return make_double2(a.x * b, a.y * b);
@@ -112,3 +113,70 @@ __inline__ __host__ __device__ float safe_acos(float x) {
     return acosf(clamp(x, -1.f, 1.f));
 }
 
+bool copyDir( boost::filesystem::path const & source,
+              boost::filesystem::path const & destination )
+{
+    try
+    {
+        // Check whether the function call is valid
+        if(!boost::filesystem::exists(source) ||
+            !boost::filesystem::is_directory(source))
+        {
+            std::cerr << "Source directory "
+                      << source.string()
+                      << " does not exist or is not a directory."
+                      << '\n';
+            return false;
+        }
+
+        if(boost::filesystem::exists(destination))
+        {
+	    boost::filesystem::remove_all(destination);
+        }
+
+        // Create the destination directory
+        if(!boost::filesystem::create_directory(destination))
+        {
+            std::cerr << "Unable to create destination directory"
+                      << destination.string() << '\n';
+            return false;
+        }
+    }
+
+    catch(boost::filesystem::filesystem_error const & e)
+    {
+        std::cerr << e.what() << '\n';
+        return false;
+    }
+
+    // Iterate through the source directory
+    for(boost::filesystem::directory_iterator file(source);
+         file != boost::filesystem::directory_iterator();
+         ++file)
+    {
+        try
+        {
+            boost::filesystem::path current(file->path());
+            if(boost::filesystem::is_directory(current))
+            {
+                // Found directory: Recursion
+                if(!copyDir(current, destination / current.filename()))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                // Found file: Copy
+                boost::filesystem::copy_file(current,
+                                              destination / current.filename());
+            }
+        }
+
+        catch(boost::filesystem::filesystem_error const & e)
+        {
+            std:: cerr << e.what() << '\n';
+        }
+    }
+    return true;
+}
