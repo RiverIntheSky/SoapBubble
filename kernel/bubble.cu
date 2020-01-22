@@ -2848,6 +2848,8 @@ Bubble::Bubble(fReal radius, fReal H, fReal U, fReal c_m, fReal Gamma_m,
 	this->outputDir.append("/");
     boost::filesystem::copy_file("../config.txt", this->outputDir + "config.txt",
 				 boost::filesystem::copy_option::overwrite_if_exists);
+    boost::filesystem::copy_file("soapBubble", this->outputDir + "soapBubble",
+				 boost::filesystem::copy_option::overwrite_if_exists);
 
     std::string includeDir = this->outputDir + "include";
     std::string kernelDir = this->outputDir + "kernel";
