@@ -31,6 +31,8 @@
 #ifndef OPENCV_FLANN_KDTREE_INDEX_H_
 #define OPENCV_FLANN_KDTREE_INDEX_H_
 
+//! @cond IGNORED
+
 #include <algorithm>
 #include <map>
 #include <cassert>
@@ -118,33 +120,31 @@ public:
     }
 
     /**
-     * Dummy implementation for other algorithms of addable indexes after that.
-     */
-    void addIndex(const Matrix<ElementType>& /*wholeData*/, const Matrix<ElementType>& /*additionalData*/)
-    {
-    }
-
-    /**
      * Builds the index
      */
-    void buildIndex()
+    void buildIndex() CV_OVERRIDE
     {
         /* Construct the randomized trees. */
         for (int i = 0; i < trees_; i++) {
             /* Randomize the order of vectors to allow for unbiased sampling. */
+#ifndef OPENCV_FLANN_USE_STD_RAND
+            cv::randShuffle(vind_);
+#else
             std::random_shuffle(vind_.begin(), vind_.end());
+#endif
+
             tree_roots_[i] = divideTree(&vind_[0], int(size_) );
         }
     }
 
 
-    flann_algorithm_t getType() const
+    flann_algorithm_t getType() const CV_OVERRIDE
     {
         return FLANN_INDEX_KDTREE;
     }
 
 
-    void saveIndex(FILE* stream)
+    void saveIndex(FILE* stream) CV_OVERRIDE
     {
         save_value(stream, trees_);
         for (int i=0; i<trees_; ++i) {
@@ -154,7 +154,7 @@ public:
 
 
 
-    void loadIndex(FILE* stream)
+    void loadIndex(FILE* stream) CV_OVERRIDE
     {
         load_value(stream, trees_);
         if (tree_roots_!=NULL) {
@@ -172,7 +172,7 @@ public:
     /**
      *  Returns size of index.
      */
-    size_t size() const
+    size_t size() const CV_OVERRIDE
     {
         return size_;
     }
@@ -180,7 +180,7 @@ public:
     /**
      * Returns the length of an index feature.
      */
-    size_t veclen() const
+    size_t veclen() const CV_OVERRIDE
     {
         return veclen_;
     }
@@ -189,7 +189,7 @@ public:
      * Computes the inde memory usage
      * Returns: memory used by the index
      */
-    int usedMemory() const
+    int usedMemory() const CV_OVERRIDE
     {
         return int(pool_.usedMemory+pool_.wastedMemory+dataset_.rows*sizeof(int));  // pool memory and vind array memory
     }
@@ -203,7 +203,7 @@ public:
      *     vec = the vector for which to search the nearest neighbors
      *     maxCheck = the maximum number of restarts (in a best-bin-first manner)
      */
-    void findNeighbors(ResultSet<DistanceType>& result, const ElementType* vec, const SearchParams& searchParams)
+    void findNeighbors(ResultSet<DistanceType>& result, const ElementType* vec, const SearchParams& searchParams) CV_OVERRIDE
     {
         int maxChecks = get_param(searchParams,"checks", 32);
         float epsError = 1+get_param(searchParams,"eps",0.0f);
@@ -216,7 +216,7 @@ public:
         }
     }
 
-    IndexParams getParameters() const
+    IndexParams getParameters() const CV_OVERRIDE
     {
         return index_params_;
     }
@@ -624,5 +624,7 @@ private:
 };   // class KDTreeForest
 
 }
+
+//! @endcond
 
 #endif //OPENCV_FLANN_KDTREE_INDEX_H_

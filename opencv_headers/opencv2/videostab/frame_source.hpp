@@ -40,18 +40,19 @@
 //
 //M*/
 
-#ifndef __OPENCV_VIDEOSTAB_FRAME_SOURCE_HPP__
-#define __OPENCV_VIDEOSTAB_FRAME_SOURCE_HPP__
+#ifndef OPENCV_VIDEOSTAB_FRAME_SOURCE_HPP
+#define OPENCV_VIDEOSTAB_FRAME_SOURCE_HPP
 
 #include <vector>
-#include <string>
-#include "opencv2/core/core.hpp"
-#include "opencv2/highgui/highgui.hpp"
+#include "opencv2/core.hpp"
 
 namespace cv
 {
 namespace videostab
 {
+
+//! @addtogroup videostab
+//! @{
 
 class CV_EXPORTS IFrameSource
 {
@@ -64,26 +65,50 @@ public:
 class CV_EXPORTS NullFrameSource : public IFrameSource
 {
 public:
-    virtual void reset() {}
-    virtual Mat nextFrame() { return Mat(); }
+    virtual void reset() CV_OVERRIDE {}
+    virtual Mat nextFrame() CV_OVERRIDE { return Mat(); }
 };
 
 class CV_EXPORTS VideoFileSource : public IFrameSource
 {
 public:
-    VideoFileSource(const std::string &path, bool volatileFrame = false);
+    VideoFileSource(const String &path, bool volatileFrame = false);
 
-    virtual void reset();
-    virtual Mat nextFrame();
+    virtual void reset() CV_OVERRIDE;
+    virtual Mat nextFrame() CV_OVERRIDE;
 
-    int frameCount() { return static_cast<int>(reader_.get(CV_CAP_PROP_FRAME_COUNT)); }
-    double fps() { return reader_.get(CV_CAP_PROP_FPS); }
+    int width();
+    int height();
+    int count();
+    double fps();
 
 private:
-    std::string path_;
-    bool volatileFrame_;
-    VideoCapture reader_;
+    Ptr<IFrameSource> impl;
 };
+
+class MaskFrameSource : public IFrameSource
+{
+public:
+    MaskFrameSource(const Ptr<IFrameSource>& source): impl(source) {};
+
+    virtual void reset() CV_OVERRIDE { impl->reset(); }
+    virtual Mat nextFrame() CV_OVERRIDE {
+        Mat nextFrame = impl->nextFrame();
+        maskCallback_(nextFrame);
+        return nextFrame;
+    }
+
+    void setMaskCallback(std::function<void(Mat&)> MaskCallback)
+    {
+        maskCallback_ = std::bind(MaskCallback, std::placeholders::_1);
+    };
+
+private:
+    Ptr<IFrameSource> impl;
+    std::function<void(Mat&)> maskCallback_;
+};
+
+//! @}
 
 } // namespace videostab
 } // namespace cv

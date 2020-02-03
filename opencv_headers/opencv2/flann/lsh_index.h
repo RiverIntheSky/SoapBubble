@@ -35,6 +35,8 @@
 #ifndef OPENCV_FLANN_LSH_INDEX_H_
 #define OPENCV_FLANN_LSH_INDEX_H_
 
+//! @cond IGNORED
+
 #include <algorithm>
 #include <cassert>
 #include <cstring>
@@ -105,55 +107,27 @@ public:
     LshIndex& operator=(const LshIndex&);
 
     /**
-    * Implementation for the LSH addable indexes after that.
-    * @param wholeData whole dataset with the input features
-    * @param additionalData additional dataset with the input features
-    */
-    void addIndex(const Matrix<ElementType>& wholeData, const Matrix<ElementType>& additionalData)
-    {
-        tables_.resize(table_number_);
-        for (unsigned int i = 0; i < table_number_; ++i) {
-            lsh::LshTable<ElementType>& table = tables_[i];
-            // Add the features to the table with indexed offset
-            table.add((int)(wholeData.rows - additionalData.rows), additionalData);
-        }
-        dataset_ = wholeData;
-    }
-
-    /**
      * Builds the index
      */
-    void buildIndex()
+    void buildIndex() CV_OVERRIDE
     {
-        std::vector<size_t> indices(feature_size_ * CHAR_BIT);
-
         tables_.resize(table_number_);
         for (unsigned int i = 0; i < table_number_; ++i) {
-
-            //re-initialize the random indices table that the LshTable will use to pick its sub-dimensions
-            if( (indices.size() == feature_size_ * CHAR_BIT) || (indices.size() < key_size_) )
-            {
-              indices.resize( feature_size_ * CHAR_BIT );
-              for (size_t j = 0; j < feature_size_ * CHAR_BIT; ++j)
-                  indices[j] = j;
-              std::random_shuffle(indices.begin(), indices.end());
-            }
-
             lsh::LshTable<ElementType>& table = tables_[i];
-            table = lsh::LshTable<ElementType>(feature_size_, key_size_, indices);
+            table = lsh::LshTable<ElementType>(feature_size_, key_size_);
 
-            // Add the features to the table with offset 0
-            table.add(0, dataset_);
+            // Add the features to the table
+            table.add(dataset_);
         }
     }
 
-    flann_algorithm_t getType() const
+    flann_algorithm_t getType() const CV_OVERRIDE
     {
         return FLANN_INDEX_LSH;
     }
 
 
-    void saveIndex(FILE* stream)
+    void saveIndex(FILE* stream) CV_OVERRIDE
     {
         save_value(stream,table_number_);
         save_value(stream,key_size_);
@@ -161,7 +135,7 @@ public:
         save_value(stream, dataset_);
     }
 
-    void loadIndex(FILE* stream)
+    void loadIndex(FILE* stream) CV_OVERRIDE
     {
         load_value(stream, table_number_);
         load_value(stream, key_size_);
@@ -179,7 +153,7 @@ public:
     /**
      *  Returns size of index.
      */
-    size_t size() const
+    size_t size() const CV_OVERRIDE
     {
         return dataset_.rows;
     }
@@ -187,7 +161,7 @@ public:
     /**
      * Returns the length of an index feature.
      */
-    size_t veclen() const
+    size_t veclen() const CV_OVERRIDE
     {
         return feature_size_;
     }
@@ -196,13 +170,13 @@ public:
      * Computes the index memory usage
      * Returns: memory used by the index
      */
-    int usedMemory() const
+    int usedMemory() const CV_OVERRIDE
     {
         return (int)(dataset_.rows * sizeof(int));
     }
 
 
-    IndexParams getParameters() const
+    IndexParams getParameters() const CV_OVERRIDE
     {
         return index_params_;
     }
@@ -215,7 +189,7 @@ public:
      * \param[in] knn Number of nearest neighbors to return
      * \param[in] params Search parameters
      */
-    virtual void knnSearch(const Matrix<ElementType>& queries, Matrix<int>& indices, Matrix<DistanceType>& dists, int knn, const SearchParams& params)
+    virtual void knnSearch(const Matrix<ElementType>& queries, Matrix<int>& indices, Matrix<DistanceType>& dists, int knn, const SearchParams& params) CV_OVERRIDE
     {
         assert(queries.cols == veclen());
         assert(indices.rows >= queries.rows);
@@ -245,7 +219,7 @@ public:
      *     vec = the vector for which to search the nearest neighbors
      *     maxCheck = the maximum number of restarts (in a best-bin-first manner)
      */
-    void findNeighbors(ResultSet<DistanceType>& result, const ElementType* vec, const SearchParams& /*searchParams*/)
+    void findNeighbors(ResultSet<DistanceType>& result, const ElementType* vec, const SearchParams& /*searchParams*/) CV_OVERRIDE
     {
         getNeighbors(vec, result);
     }
@@ -416,5 +390,7 @@ private:
     Distance distance_;
 };
 }
+
+//! @endcond
 
 #endif //OPENCV_FLANN_LSH_INDEX_H_

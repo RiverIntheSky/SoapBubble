@@ -30,12 +30,14 @@
 #ifndef OPENCV_FLANN_DEFINES_H_
 #define OPENCV_FLANN_DEFINES_H_
 
+//! @cond IGNORED
+
 #include "config.h"
 
 #ifdef FLANN_EXPORT
 #undef FLANN_EXPORT
 #endif
-#ifdef WIN32
+#ifdef _WIN32
 /* win32 dll export/import directives */
  #ifdef FLANN_EXPORTS
   #define FLANN_EXPORT __declspec(dllexport)
@@ -47,19 +49,6 @@
 #else
 /* unix needs nothing */
  #define FLANN_EXPORT
-#endif
-
-
-#ifdef FLANN_DEPRECATED
-#undef FLANN_DEPRECATED
-#endif
-#ifdef __GNUC__
-#define FLANN_DEPRECATED __attribute__ ((deprecated))
-#elif defined(_MSC_VER)
-#define FLANN_DEPRECATED __declspec(deprecated)
-#else
-#pragma message("WARNING: You need to implement FLANN_DEPRECATED for this compiler")
-#define FLANN_DEPRECATED
 #endif
 
 
@@ -107,6 +96,7 @@ enum flann_centers_init_t
     FLANN_CENTERS_RANDOM = 0,
     FLANN_CENTERS_GONZALES = 1,
     FLANN_CENTERS_KMEANSPP = 2,
+    FLANN_CENTERS_GROUPWISE = 3,
 
     // deprecated constants, should use the FLANN_CENTERS_* ones instead
     CENTERS_RANDOM = 0,
@@ -172,5 +162,7 @@ enum
 };
 
 }
+
+//! @endcond
 
 #endif /* OPENCV_FLANN_DEFINES_H_ */

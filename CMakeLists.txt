@@ -45,6 +45,7 @@ cuda_add_executable(soapBubble
 target_link_libraries(soapBubble
   opencv_core
   opencv_highgui
+  opencv_imgcodecs
   opencv_imgproc
   z
   cudart

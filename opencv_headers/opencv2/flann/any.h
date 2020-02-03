@@ -12,6 +12,8 @@
  * Adapted for FLANN by Marius Muja
  */
 
+//! @cond IGNORED
+
 #include "defines.h"
 #include <stdexcept>
 #include <ostream>
@@ -44,59 +46,60 @@ struct base_any_policy
     virtual void clone(void* const* src, void** dest) = 0;
     virtual void move(void* const* src, void** dest) = 0;
     virtual void* get_value(void** src) = 0;
+    virtual const void* get_value(void* const * src) = 0;
     virtual ::size_t get_size() = 0;
     virtual const std::type_info& type() = 0;
     virtual void print(std::ostream& out, void* const* src) = 0;
-
-#ifdef OPENCV_CAN_BREAK_BINARY_COMPATIBILITY
     virtual ~base_any_policy() {}
-#endif
 };
 
 template<typename T>
 struct typed_base_any_policy : base_any_policy
 {
-    virtual ::size_t get_size() { return sizeof(T); }
-    virtual const std::type_info& type() { return typeid(T); }
+    virtual ::size_t get_size() CV_OVERRIDE { return sizeof(T); }
+    virtual const std::type_info& type() CV_OVERRIDE { return typeid(T); }
 
 };
 
 template<typename T>
-struct small_any_policy : typed_base_any_policy<T>
+struct small_any_policy CV_FINAL : typed_base_any_policy<T>
 {
-    virtual void static_delete(void**) { }
-    virtual void copy_from_value(void const* src, void** dest)
+    virtual void static_delete(void**) CV_OVERRIDE { }
+    virtual void copy_from_value(void const* src, void** dest) CV_OVERRIDE
     {
         new (dest) T(* reinterpret_cast<T const*>(src));
     }
-    virtual void clone(void* const* src, void** dest) { *dest = *src; }
-    virtual void move(void* const* src, void** dest) { *dest = *src; }
-    virtual void* get_value(void** src) { return reinterpret_cast<void*>(src); }
-    virtual void print(std::ostream& out, void* const* src) { out << *reinterpret_cast<T const*>(src); }
+    virtual void clone(void* const* src, void** dest) CV_OVERRIDE { *dest = *src; }
+    virtual void move(void* const* src, void** dest) CV_OVERRIDE { *dest = *src; }
+    virtual void* get_value(void** src) CV_OVERRIDE { return reinterpret_cast<void*>(src); }
+    virtual const void* get_value(void* const * src) CV_OVERRIDE { return reinterpret_cast<const void*>(src); }
+    virtual void print(std::ostream& out, void* const* src) CV_OVERRIDE { out << *reinterpret_cast<T const*>(src); }
 };
 
 template<typename T>
-struct big_any_policy : typed_base_any_policy<T>
+struct big_any_policy CV_FINAL : typed_base_any_policy<T>
 {
-    virtual void static_delete(void** x)
+    virtual void static_delete(void** x) CV_OVERRIDE
     {
-        if (* x) { delete (* reinterpret_cast<T**>(x)); *x = NULL; }
+        if (* x) delete (* reinterpret_cast<T**>(x));
+        *x = NULL;
     }
-    virtual void copy_from_value(void const* src, void** dest)
+    virtual void copy_from_value(void const* src, void** dest) CV_OVERRIDE
     {
         *dest = new T(*reinterpret_cast<T const*>(src));
     }
-    virtual void clone(void* const* src, void** dest)
+    virtual void clone(void* const* src, void** dest) CV_OVERRIDE
     {
         *dest = new T(**reinterpret_cast<T* const*>(src));
     }
-    virtual void move(void* const* src, void** dest)
+    virtual void move(void* const* src, void** dest) CV_OVERRIDE
     {
         (*reinterpret_cast<T**>(dest))->~T();
         **reinterpret_cast<T**>(dest) = **reinterpret_cast<T* const*>(src);
     }
-    virtual void* get_value(void** src) { return *src; }
-    virtual void print(std::ostream& out, void* const* src) { out << *reinterpret_cast<T const*>(*src); }
+    virtual void* get_value(void** src) CV_OVERRIDE { return *src; }
+    virtual const void* get_value(void* const * src) CV_OVERRIDE { return *src; }
+    virtual void print(std::ostream& out, void* const* src) CV_OVERRIDE { out << *reinterpret_cast<T const*>(*src); }
 };
 
 template<> inline void big_any_policy<flann_centers_init_t>::print(std::ostream& out, void* const* src)
@@ -107,6 +110,11 @@ template<> inline void big_any_policy<flann_centers_init_t>::print(std::ostream&
 template<> inline void big_any_policy<flann_algorithm_t>::print(std::ostream& out, void* const* src)
 {
     out << int(*reinterpret_cast<flann_algorithm_t const*>(*src));
+}
+
+template<> inline void big_any_policy<cv::String>::print(std::ostream& out, void* const* src)
+{
+    out << (*reinterpret_cast<cv::String const*>(*src)).c_str();
 }
 
 template<typename T>
@@ -240,6 +248,12 @@ public:
         return assign(x);
     }
 
+    /// Assignment operator. Template-based version above doesn't work as expected. We need regular assignment operator here.
+    any& operator=(const any& x)
+    {
+        return assign(x);
+    }
+
     /// Assignment operator, specialed for literal strings.
     /// They have types like const char [6] which don't work as expected.
     any& operator=(const char* x)
@@ -269,7 +283,7 @@ public:
     const T& cast() const
     {
         if (policy->type() != typeid(T)) throw anyimpl::bad_any_cast();
-        T* r = reinterpret_cast<T*>(policy->get_value(const_cast<void **>(&object)));
+        const T* r = reinterpret_cast<const T*>(policy->get_value(&object));
         return *r;
     }
 
@@ -314,5 +328,7 @@ inline std::ostream& operator <<(std::ostream& out, const any& any_val)
 }
 
 }
+
+//! @endcond
 
 #endif // OPENCV_FLANN_ANY_H_

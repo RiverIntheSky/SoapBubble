@@ -40,12 +40,12 @@
 //
 //M*/
 
-#ifndef _OPENCV_MINIFLANN_HPP_
-#define _OPENCV_MINIFLANN_HPP_
+#ifndef OPENCV_MINIFLANN_HPP
+#define OPENCV_MINIFLANN_HPP
 
-#ifdef __cplusplus
+//! @cond IGNORED
 
-#include "opencv2/core/core.hpp"
+#include "opencv2/core.hpp"
 #include "opencv2/flann/defines.h"
 
 namespace cv
@@ -54,28 +54,47 @@ namespace cv
 namespace flann
 {
 
+enum FlannIndexType {
+    FLANN_INDEX_TYPE_8U = CV_8U,
+    FLANN_INDEX_TYPE_8S = CV_8S,
+    FLANN_INDEX_TYPE_16U = CV_16U,
+    FLANN_INDEX_TYPE_16S = CV_16S,
+    FLANN_INDEX_TYPE_32S = CV_32S,
+    FLANN_INDEX_TYPE_32F = CV_32F,
+    FLANN_INDEX_TYPE_64F = CV_64F,
+    FLANN_INDEX_TYPE_STRING,
+    FLANN_INDEX_TYPE_BOOL,
+    FLANN_INDEX_TYPE_ALGORITHM,
+    LAST_VALUE_FLANN_INDEX_TYPE = FLANN_INDEX_TYPE_ALGORITHM
+};
+
 struct CV_EXPORTS IndexParams
 {
     IndexParams();
     ~IndexParams();
 
-    std::string getString(const std::string& key, const std::string& defaultVal=std::string()) const;
-    int getInt(const std::string& key, int defaultVal=-1) const;
-    double getDouble(const std::string& key, double defaultVal=-1) const;
+    String getString(const String& key, const String& defaultVal=String()) const;
+    int getInt(const String& key, int defaultVal=-1) const;
+    double getDouble(const String& key, double defaultVal=-1) const;
 
-    void setString(const std::string& key, const std::string& value);
-    void setInt(const std::string& key, int value);
-    void setDouble(const std::string& key, double value);
-    void setFloat(const std::string& key, float value);
-    void setBool(const std::string& key, bool value);
+    void setString(const String& key, const String& value);
+    void setInt(const String& key, int value);
+    void setDouble(const String& key, double value);
+    void setFloat(const String& key, float value);
+    void setBool(const String& key, bool value);
     void setAlgorithm(int value);
 
-    void getAll(std::vector<std::string>& names,
-                std::vector<int>& types,
-                std::vector<std::string>& strValues,
+    // FIXIT: replace by void write(FileStorage& fs) const + read()
+    void getAll(std::vector<String>& names,
+                std::vector<FlannIndexType>& types,
+                std::vector<String>& strValues,
                 std::vector<double>& numValues) const;
 
     void* params;
+
+private:
+    IndexParams(const IndexParams &); // copy disabled
+    IndexParams& operator=(const IndexParams &); // assign disabled
 };
 
 struct CV_EXPORTS KDTreeIndexParams : public IndexParams
@@ -119,7 +138,7 @@ struct CV_EXPORTS LshIndexParams : public IndexParams
 
 struct CV_EXPORTS SavedIndexParams : public IndexParams
 {
-    SavedIndexParams(const std::string& filename);
+    SavedIndexParams(const String& filename);
 };
 
 struct CV_EXPORTS SearchParams : public IndexParams
@@ -134,8 +153,7 @@ public:
     CV_WRAP Index(InputArray features, const IndexParams& params, cvflann::flann_distance_t distType=cvflann::FLANN_DIST_L2);
     virtual ~Index();
 
-    CV_WRAP virtual void build(InputArray wholefeatures, InputArray additionalfeatures, const IndexParams& params, cvflann::flann_distance_t distType=cvflann::FLANN_DIST_L2);
-
+    CV_WRAP virtual void build(InputArray features, const IndexParams& params, cvflann::flann_distance_t distType=cvflann::FLANN_DIST_L2);
     CV_WRAP virtual void knnSearch(InputArray query, OutputArray indices,
                    OutputArray dists, int knn, const SearchParams& params=SearchParams());
 
@@ -143,8 +161,8 @@ public:
                              OutputArray dists, double radius, int maxResults,
                              const SearchParams& params=SearchParams());
 
-    CV_WRAP virtual void save(const std::string& filename) const;
-    CV_WRAP virtual bool load(InputArray features, const std::string& filename);
+    CV_WRAP virtual void save(const String& filename) const;
+    CV_WRAP virtual bool load(InputArray features, const String& filename);
     CV_WRAP virtual void release();
     CV_WRAP cvflann::flann_distance_t getDistance() const;
     CV_WRAP cvflann::flann_algorithm_t getAlgorithm() const;
@@ -158,6 +176,6 @@ protected:
 
 } } // namespace cv::flann
 
-#endif // __cplusplus
+//! @endcond
 
 #endif
