@@ -38,14 +38,15 @@ class Bubble
 private:
     fReal radius;               // radius of sphere. m
     fReal invRadius;		// inverted radius of sphere. m^-1
-    fReal H;			// characteristic film thickness. m
-    fReal U;			// characteristic flow velocity. m s^-1
+    fReal H;			// mean half film thickness. m
+    fReal U;			// characteristic flow velocity. 1 m s^-1
     fReal c_m;			// bulk mean concentration. mol m^-3
     fReal Gamma_m;		// surface mean concentration. mol m^-2
     fReal T;			// room temperature. K
     fReal Ds;			// soap diffusivity. m^2 s^-1
     fReal gs;                   // nondimensional gravity
-    fReal rm;			// Van der Waals constant
+    fReal rm;			// A quantity in Lennard-Jones potential, the distance
+                                // where the potential minimum is reached. Not used. m
     fReal epsilon;		// expansion parameter
     fReal sigma_r;		// accounts for the elasticity of the film.
     fReal M;			// M.

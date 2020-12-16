@@ -79,6 +79,10 @@ Solver::Solver(size_t nPhi, size_t nTheta, fReal radius, fReal dt,
     checkCudaErrors(cudaMalloc(&div, N * sizeof(fReal)));
     checkCudaErrors(cudaMalloc(&uair, N * sizeof(fReal)));
     checkCudaErrors(cudaMalloc(&vair, (N - nPhi) * sizeof(fReal)));
+    checkCudaErrors(cudaMalloc(&uair_init, N * sizeof(fReal)));
+    checkCudaErrors(cudaMalloc(&vair_init, (N - nPhi) * sizeof(fReal)));
+    checkCudaErrors(cudaMalloc(&fu, N * sizeof(fReal)));
+    checkCudaErrors(cudaMalloc(&fv, (N - nPhi) * sizeof(fReal)));
     checkCudaErrors(cudaMalloc(&row_ptr, (N + 1) * sizeof(int)));
     checkCudaErrors(cudaMalloc(&col_ind, nz * sizeof(int)));
     checkCudaErrors(cudaMalloc(&rhs, N * sizeof(fReal)));
@@ -161,6 +165,10 @@ Solver::~Solver()
     checkCudaErrors(cudaFree(div));
     checkCudaErrors(cudaFree(uair));
     checkCudaErrors(cudaFree(vair));
+    checkCudaErrors(cudaFree(uair_init));
+    checkCudaErrors(cudaFree(vair_init));
+    checkCudaErrors(cudaFree(fu));
+    checkCudaErrors(cudaFree(fv));
     checkCudaErrors(cudaFree(row_ptr));
     checkCudaErrors(cudaFree(col_ind));
     checkCudaErrors(cudaFree(rhs));
@@ -269,10 +277,11 @@ void Solver::stepForward() {
 # ifdef PERFORMANCE_BENCHMARK
     this->bodyforceTime += timer.stopTimer() * 0.001f;
 # endif
-    # ifdef BIMOCQ
+# ifdef BIMOCQ
     fReal distortion = estimateDistortion();
     std::cout << "max distortion " << distortion << std::endl;
-    if (distortion > 2.f) {
+    // can be adjusted empirically
+    if (distortion > 4.f) {
 	reInitializeMapping();
 	std::cout << "mapping reinitialized" << std::endl;
     }
@@ -322,11 +331,9 @@ bool Solver::isBroken() {
     return this->broken;
 }
 
-
 void Solver::setBroken(bool broken) {
     this->broken = broken;
 }
-
 
 void Solver::write_image(const std::string& s, size_t width, size_t height, std::vector<float> *images) {
     const char *filename = s.c_str();
@@ -580,10 +587,6 @@ void Solver::write_thickness_img(const std::string& s, const int frame)
 	of << std::endl;
 # endif
     }
-    // # ifdef WRITE_TXT
-    thick << minE << std::endl;
-    thick.close();
-    //# endif
 
     write_image(img_string, nPhi, nTheta, images);
     std::cout << "min thickness " << minE << std::endl;

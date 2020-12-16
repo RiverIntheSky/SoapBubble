@@ -38,6 +38,7 @@
 # define greatCircle
 
 // The solution to switch between double and float
+// WARNING: float creats artifacts at the poles
 // # define USEFLOAT
 
 # ifdef USEFLOAT
@@ -74,11 +75,13 @@ static __inline__ __host__ __device__ double3 make_fReal3(double a, double b, do
 
 const fReal R = 8.3144598;              // gas constant. J mol^-1 K^-1
 const fReal sigma_a = 0.07275;		// surface tension of water. N m^-1
-const fReal rho = 997;			// bulk fluid density. kg m^-3
-const fReal mu = 0.00089;		// soap solution dynamic viscosity. Pa s
+const fReal rho = 1e3;			// bulk fluid density. kg m^-3
+// const fReal mu = 0.00089;		// soap solution dynamic viscosity. Pa s
 const fReal g = 9.8;			// standard gravity. m s^-2
 const fReal rhoa = 1.184;		// air density. kg m^-3
 const fReal nua = 1.562e-5;		// air kinematic viscosity. m^2 s^-1
+const fReal nu = 1.25e-4;		// soap solution kinematic viscosity m^2 s^-1
+
 
 // # define WRITE_VELOCITY_DATA
 # define WRITE_THICKNESS_DATA
@@ -86,17 +89,10 @@ const fReal nua = 1.562e-5;		// air kinematic viscosity. m^2 s^-1
 # define RUNGE_KUTTA
 # define PERFORMANCE_BENCHMARK
 # define TINYEXR_IMPLEMENTATION
-# define sphere
 # define gravity
-// # define tiltedGravity
-
-// if both gravity and tilted are defined, tilted has priority
-# ifdef tiltedGravity
-# undef gravity
-# endif
-
-# define evaporation -0.00000008
-# define air
+# define evaporation -0.00000003
+# define airflow
 // # define WRITE_TXT
 # define BIMOCQ
 # define MULTISAMPLE
+// # define VISCOUS

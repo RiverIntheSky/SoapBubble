@@ -64,7 +64,8 @@ void Solver::initThicknessfromPic(std::string path)
 	    	for (size_t j = 0; j < nTheta; ++j) {
 	    	    cv::Point3_<float>* p = image_Resized.ptr<cv::Point3_<float>>(j, i);
 	    	    fReal C = (fReal)p->x; // Gray Scale
-		    C = (C - 0.5) * 0.1 + 0.5;
+		    // rescaling thickness
+		    C = (C - 0.5) * 0.3 + 0.5;
 		    this->thickness->setCPUValueAt(i, j, C);
 	    	}
 	    }
@@ -79,4 +80,56 @@ void Solver::initThicknessfromPic(std::string path)
     checkCudaErrors(cudaMemcpy(this->thickness->getGPUInitLast(), this->thickness->getGPUThisStep(),
 			  this->thickness->getThisStepPitchInElements() * this->thickness->getNTheta() *
 			  sizeof(fReal), cudaMemcpyDeviceToDevice));
+
+    checkCudaErrors(cudaMemset(this->thickness->getGPUDelta(), 0,
+			       pitch * sizeof(fReal) * this->thickness->getNTheta()));
+
+    checkCudaErrors(cudaMemset(this->thickness->getGPUDeltaLast(), 0,
+			       pitch * sizeof(fReal) * this->thickness->getNTheta()));
+
+    dim3 gridLayout;
+    dim3 blockLayout;
+    determineLayout(gridLayout, blockLayout, nTheta, nPhi);
+    initMapping<<<gridLayout, blockLayout>>>(forward_t, forward_p);
+    initMapping<<<gridLayout, blockLayout>>>(backward_t, backward_p);
+    initMapping<<<gridLayout, blockLayout>>>(backward_tprev, backward_pprev);
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
+}
+
+
+void Solver::initAirflowfromPic(std::string path)
+{
+    if (path == "") {
+	std::cout << "No airflow image provided, initialize with zero" << std::endl;
+    } else {
+	cv::Mat image_In, image_Resized;
+	image_In = cv::imread(path, cv::IMREAD_UNCHANGED);
+	if (!image_In.data) {
+	    std::cout << "No airflow image provided, initialize with zero" << std::endl;
+	} else {
+	    cv::Size size(nPhi, nTheta);
+	    cv::resize(image_In, image_Resized, size);
+
+	    fReal* uairCPU = new fReal[N];
+	    fReal* vairCPU = new fReal[N - nPhi];
+	    
+	    for (size_t i = 0; i < nPhi; ++i) {
+	    	for (size_t j = 0; j < nTheta; ++j) {
+	    	    cv::Point3_<float>* p1 = image_Resized.ptr<cv::Point3_<float>>(j, i);
+		    cv::Point3_<float>* p2 = image_Resized.ptr<cv::Point3_<float>>(j, (i + nPhi- 1) % nPhi);
+		    uairCPU[j * nPhi + i] = 0.5 * (p1->y + p2->y) * radius;
+		    if (j < nTheta - 1) {
+			cv::Point3_<float>* p3 = image_Resized.ptr<cv::Point3_<float>>(j + 1, i);
+			vairCPU[j * nPhi + i] = -0.5 * (p1->z + p3->z) * radius;
+		    }
+	    	}	
+	    }
+
+	    CHECK_CUDA(cudaMemcpy(uair_init, uairCPU, sizeof(fReal) * N,
+				  cudaMemcpyHostToDevice));
+	    CHECK_CUDA(cudaMemcpy(vair_init, vairCPU, sizeof(fReal) * (N - nPhi),
+				  cudaMemcpyHostToDevice));
+       	}
+    }
 }

@@ -40,6 +40,9 @@ private:
     fReal* div;
     /* airflow */
     fReal *uair, *vair;
+    fReal *uair_init, *vair_init;
+    /* external force */
+    fReal *fu, *fv;
 
     /* cuSPARSE and cuBLAS*/
     int N;
@@ -109,6 +112,7 @@ public:
     void initWithConst(Quantity* attrib, fReal val);
     void initWithConst(BimocqQuantity* attrib, fReal val);
     void initThicknessfromPic(std::string path);
+    void initAirflowfromPic(std::string path);
 
     void copyToCPU(Quantity* quantity, fReal* cpubuffer);
     void stepForward(fReal timeStep);
