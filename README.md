@@ -37,7 +37,7 @@ Please have a look at those `# define`s in `include/header.cuh` and how they are
 
 
 ## Output
-A sequence of grayscale textures storing the thickness of the film, scaled by H in config.txt
+A sequence of grayscale textures storing the thickness of the film, scaled by H in `config.txt`
 
 ## Side notes
 Attempts on bubbles breaking and Van der Waals forces is made, with little success.
